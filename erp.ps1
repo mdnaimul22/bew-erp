@@ -18,7 +18,8 @@ param(
     [switch]$Setup,
     [switch]$Run,
     [switch]$Status,
-    [switch]$Stop
+    [switch]$Stop,
+    [switch]$Restart
 )
 
 $PYTHON  = "C:\Users\PC\AppData\Local\Programs\Python\Python311\python.exe"
@@ -36,13 +37,25 @@ function Log($msg) {
 }
 
 function Git {
-    param([string[]]$Args)
-    & $GIT -C $DIR @Args 2>&1
+    $flatArgs = @()
+    foreach ($a in $args) {
+        if ($a -is [System.Array]) { $flatArgs += $a }
+        else { $flatArgs += $a }
+    }
+    & $GIT -C $DIR @flatArgs 2>&1
 }
 
 function Get-App {
-    Get-CimInstance Win32_Process |
+    $proc = Get-CimInstance Win32_Process |
         Where-Object { $_.Name -eq "python.exe" -and $_.CommandLine -like "*$APP*" }
+    if (-not $proc) {
+        $pids = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess
+        if ($pids) {
+            $proc = Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -in $pids }
+        }
+    }
+    return $proc
 }
 
 function Start-App {
@@ -59,6 +72,7 @@ function Stop-App {
     }
 }
 
+
 # ── STATUS ─────────────────────────────────────────────────────────────────
 if ($Status) {
     Write-Host "`n=== BEW ERP Status ===" -ForegroundColor Cyan
@@ -66,8 +80,17 @@ if ($Status) {
     else          { Write-Host "[FAIL] App: NOT RUNNING" -ForegroundColor Red }
 
     $t = Get-ScheduledTask -TaskName $TASK -ErrorAction SilentlyContinue
-    if ($t) { Write-Host "[OK]   Task: $($t.State)" -ForegroundColor Green }
-    else     { Write-Host "[FAIL] Task: NOT REGISTERED" -ForegroundColor Red }
+    if ($t) { 
+        Write-Host "[OK]   Task: $($t.State)" -ForegroundColor Green 
+    } else {
+        $taskCheck = schtasks /query /tn $TASK 2>&1
+        if ($taskCheck -match "Access is denied|ERROR: Access") {
+            Write-Host "[OK]   Task: REGISTERED (SYSTEM / Running at Boot)" -ForegroundColor Green
+        } else {
+            Write-Host "[FAIL] Task: NOT REGISTERED" -ForegroundColor Red
+        }
+    }
+
 
     $ok = Test-NetConnection localhost -Port 5000 -InformationLevel Quiet
     if ($ok) { Write-Host "[OK]   Port 5000: OPEN" -ForegroundColor Green }
@@ -79,6 +102,15 @@ if ($Status) {
 
 # ── STOP ───────────────────────────────────────────────────────────────────
 if ($Stop) { Stop-App; return }
+
+# ── RESTART ────────────────────────────────────────────────────────────────
+if ($Restart) {
+    Log "Restarting app..."
+    Stop-App
+    Start-App
+    return
+}
+
 
 # ── SETUP (Admin) ──────────────────────────────────────────────────────────
 if ($Setup) {
