@@ -105,8 +105,9 @@ then `display_id` + `client_key` are the merge-safe identity.
 
 ## 6. Guard reference (fresh DBs enforce via model; legacy files via §3 startup backfill where SQLite allows)
 
-- `CHECK (quantity > 0)` on `sale_items`, `supplier_purchase_items`,
-  `work_order_parts (qty)`, `stock_movements`.
+- `CHECK (quantity >= 0)` on `sale_items`, `supplier_purchase_items`,
+  `work_order_parts (qty)`, `stock_movements` (zero allowed — Task 3
+  handles qty=0 lines with a rate=0 fallback; negatives still rejected).
 - `CHECK (movement_type IN ('IN','OUT','ADJUST'))` on `stock_movements`.
 - `CHECK (payment_status IN ('pending','paid','partial','cancelled'))`
   on `supplier_purchases`, `work_orders`.

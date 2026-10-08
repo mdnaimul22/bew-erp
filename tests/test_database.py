@@ -686,6 +686,42 @@ class TestMergeSafeIdentity:
                 if type(c).__name__ == 'CheckConstraint')
             assert col in checks, model
 
+    def test_zero_quantity_line_persists(self, app_context):
+        """qty=0 lines persist on a fresh DB (CHECK is >= 0; Task 3
+        handles qty=0 with a rate=0 fallback). Negatives stay rejected
+        by the fresh-DB CHECK text (asserted on metadata: the shared
+        test DB file predates CHECKs, which SQLite cannot backfill
+        without a rewrite, so a live negative insert there proves
+        nothing)."""
+        from src.db.database import (
+            db, SaleItem, StockMovement, SupplierPurchaseItem,
+            WorkOrderPart)
+        buyer_id = self._make_buyer(db, 'zeroqty')
+        sale_id = None
+        try:
+            sale_id = db.add_sale({
+                'buyer_id': buyer_id,
+                'items': [{'product_name': 'Free sample', 'quantity': 0,
+                           'unit_price': 100}],
+            })
+            line = SaleItem.query.filter_by(sale_id=sale_id).first()
+            assert line is not None
+            assert line.quantity == 0
+        finally:
+            db.session.rollback()
+            if sale_id is not None:
+                self._cleanup_sale(db, sale_id, buyer_id)
+        for model, col in [(SaleItem, 'quantity'),
+                           (SupplierPurchaseItem, 'quantity'),
+                           (WorkOrderPart, 'qty'),
+                           (StockMovement, 'quantity')]:
+            texts = [str(c.sqltext).replace(' ', '')
+                     for c in model.__table__.constraints
+                     if type(c).__name__ == 'CheckConstraint'
+                     and col in str(c.sqltext)]
+            assert any(f'{col}>=0' in t for t in texts), (
+                model, texts)
+
     def test_sale_create_route_idempotent(self, auth_client, app_context):
         """POST /dashboard/sales/new twice with one Idempotency-Key ->
         same sale (same redirect target), no duplicate row."""

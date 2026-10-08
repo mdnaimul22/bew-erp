@@ -129,7 +129,15 @@ with app.app_context():
     # indexes) on legacy DB files. Additive only — never rewrites a
     # table, never fails startup.
     from src.db.database import ensure_merge_safe_columns
-    ensure_merge_safe_columns()
+    _merge_summary = ensure_merge_safe_columns()
+    for _skipped in _merge_summary.get('skipped', []):
+        app.logger.warning(
+            'UNIQUE guard %s NOT enforced (legacy duplicates) — '
+            'dedupe first, see docs/transfer-protocol.md', _skipped)
+    if _merge_summary.get('error'):
+        app.logger.warning(
+            'ensure_merge_safe_columns incomplete: %s',
+            _merge_summary['error'])
 
 # ── Set language route ───────────────────────────────────────
 @app.route('/set_lang/<lang>')

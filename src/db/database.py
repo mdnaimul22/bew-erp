@@ -1315,12 +1315,15 @@ class IDSequence(db.Model):
     next_number = db.Column(db.Integer, default=1)
 
 def generate_id(prefix):
-    """Thread-safe ID generation with retry on sequence-row races.
+    """Best-effort ID generation with retry on sequence-row races.
 
     Two machines sharing one DB file (GitHub-as-transfer) can race when
     both create the same ``IDSequence`` row at once; the loser rolls back
     and re-reads instead of blowing up. The last-resort uuid suffix keeps
-    the return value unique even under pathological contention.
+    the return value unique even under pathological contention. Note this
+    is NOT the real uniqueness guard: the downstream ``display_id``
+    UNIQUE constraint plus ``_resync_id_sequence`` retry in the
+    ``add_*`` writers is what converges overlapping sequences.
     """
     for _ in range(3):
         try:
@@ -1355,9 +1358,17 @@ _DISPLAY_ID_RETRY_ATTEMPTS = 3
 
 def _is_display_id_collision(exc):
     """True when an IntegrityError is a display_id UNIQUE collision
-    (as opposed to any other constraint failure, which must re-raise)."""
+    (as opposed to any other constraint failure, which must re-raise).
+
+    SQLite reports these as ``UNIQUE constraint failed:
+    <table>.<column>`` (via ``sqlite3.IntegrityError`` surfaced as
+    ``exc.orig``), so require both the UNIQUE marker and the column
+    name — a bare ``'display_id' in msg`` substring on the
+    driver-agnostic message is brittle (e.g. a product name containing
+    "display_id" in some other constraint's message would misfire).
+    """
     msg = str(getattr(exc, 'orig', exc) or exc)
-    return 'display_id' in msg
+    return 'UNIQUE' in msg and 'display_id' in msg
 
 
 def _resync_id_sequence(prefix, model):
@@ -1457,7 +1468,15 @@ def ensure_merge_safe_columns():
     (SQLite cannot add a CHECK to an existing table). Every step is
     idempotent and a skipped guard only logs a warning — startup never
     fails because of this function.
+
+    Returns a summary dict ``{'created': [...], 'skipped': [...],
+    'error': str|None}`` where ``skipped`` names UNIQUE guards omitted
+    because legacy duplicate values exist. main.py logs any skipped
+    names at WARNING so the unguarded state is impossible to miss at
+    startup (a bare ``logger.warning`` inside this module is easy to
+    overlook in a noisy log file).
     """
+    summary = {'created': [], 'skipped': [], 'error': None}
     try:
         for table, col, coltype in (
                 ('sales', 'client_key', 'VARCHAR(64)'),
@@ -1486,12 +1505,14 @@ def ensure_merge_safe_columns():
                     f"Skipped UNIQUE guard {name} on {table}: legacy "
                     f"duplicate values exist (dedupe first, see "
                     f"docs/transfer-protocol.md)")
+                summary['skipped'].append(name)
                 continue
             cols_sql = ', '.join(f'"{c}"' for c in cols)
             db.session.execute(db.text(
                 f'CREATE UNIQUE INDEX IF NOT EXISTS "{name}" '
                 f'ON "{table}" ({cols_sql})'))
             logger.info(f"Created UNIQUE guard {name} on {table}")
+            summary['created'].append(name)
 
         for table, name, col in (
                 ('buyer_contacts', 'ix_buyer_contacts_buyer_id',
@@ -1513,6 +1534,8 @@ def ensure_merge_safe_columns():
     except Exception as e:
         db.session.rollback()
         logger.warning(f"ensure_merge_safe_columns skipped guards: {e}")
+        summary['error'] = str(e)
+    return summary
 
 # ==================== RAW MATERIAL CATEGORY ====================
 class RawMaterialCategory(db.Model):
@@ -1607,7 +1630,7 @@ class StockMovement(db.Model):
     __table_args__ = (
         CheckConstraint("movement_type IN ('IN', 'OUT', 'ADJUST')",
                         name='ck_stock_movement_type'),
-        CheckConstraint('quantity > 0', name='ck_stock_movement_qty'),
+        CheckConstraint('quantity >= 0', name='ck_stock_movement_qty'),
         UniqueConstraint('raw_material_id', 'source_type', 'source_id',
                          name='uq_stock_movement_source'),
     )
@@ -1881,7 +1904,7 @@ class SaleItem(db.Model):
     raw_material = db.relationship('RawMaterial')
 
     __table_args__ = (
-        CheckConstraint('quantity > 0', name='ck_sale_item_qty'),
+        CheckConstraint('quantity >= 0', name='ck_sale_item_qty'),
     )
 
     def to_dict(self):
@@ -1975,7 +1998,7 @@ class SupplierPurchaseItem(db.Model):
     raw_material = db.relationship('RawMaterial')
 
     __table_args__ = (
-        CheckConstraint('quantity > 0', name='ck_supplier_purchase_item_qty'),
+        CheckConstraint('quantity >= 0', name='ck_supplier_purchase_item_qty'),
     )
 
     def to_dict(self):
@@ -2135,7 +2158,7 @@ class WorkOrderPart(db.Model):
     raw_material = db.relationship('RawMaterial')
 
     __table_args__ = (
-        CheckConstraint('qty > 0', name='ck_work_order_part_qty'),
+        CheckConstraint('qty >= 0', name='ck_work_order_part_qty'),
     )
 
     def to_dict(self):
