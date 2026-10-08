@@ -95,15 +95,19 @@ def update(work_order_id, form_data, files=None):
         'job_name': form_data.get('job_name'),
         'job_description': form_data.get('job_description'),
         'status': form_data.get('status'),
-        'quoted_price': safe_float(form_data.get('quoted_price'), field='quoted_price'),
         'delivery_date': delivery_date,
-        'labor_cost': safe_float(form_data.get('labor_cost'), field='labor_cost'),
-        'material_cost': safe_float(form_data.get('material_cost'), field='material_cost'),
-        'total_cost': safe_float(form_data.get('total_cost'), field='total_cost'),
         'hard_copy_path': hard_copy_path,
         'parts': parts,
         'documents': documents,
     }
+
+    # Omit money keys the form did not submit: safe_float(None) -> 0.0 would
+    # otherwise zero real values and re-trigger pending validation on legacy
+    # paid>quoted rows. A field present-but-empty still coerces to 0.0.
+    for key in ('quoted_price', 'labor_cost', 'material_cost', 'total_cost'):
+        raw = form_data.get(key)
+        if raw is not None:
+            data[key] = safe_float(raw, field=key)
 
     db.update_work_order(work_order_id, data)
     logger.info(f"Updated work order #{work_order_id}")

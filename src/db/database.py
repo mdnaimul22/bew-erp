@@ -13,6 +13,7 @@ logger = setup_logger(Settings.LOG_DIR / "db.log", name="bew.db.database")
 from src.helpers.semantic import SemanticSearch
 from src.helpers.engine import normalize_text, tokenize, calculate_score
 from src.helpers.utils import safe_float, safe_int, accept_or_recompute, compute_totals, derive_pending
+from src.helpers.exceptions import ValidationError
 
 
 class SQLAlchemy(SQLAlchemy):
@@ -867,8 +868,10 @@ class SQLAlchemy(SQLAlchemy):
             if 'quoted_price' in data:
                 work_order.quoted_price = safe_float(data.get('quoted_price'), field='quoted_price')
 
-            if any(k in data for k in ('quoted_price', 'paid_amount', 'pending_amount')):
+            if any(k in data for k in ('quoted_price', 'paid_amount')):
                 # Client pending_amount is advisory only — always derived server-side.
+                # It must never trigger validation on its own (legacy
+                # paid>quoted rows stay editable for non-money edits).
                 work_order.pending_amount = derive_pending(
                     work_order.quoted_price or 0, work_order.paid_amount or 0)
 
@@ -896,12 +899,33 @@ class SQLAlchemy(SQLAlchemy):
             work_order.updated_at = datetime.datetime.now()
 
             if 'parts' in data:
-                # Cleanup existing linked purchases and parts for this work order
-                SupplierPurchase.query.filter_by(work_order_id=work_order.id).delete()
-                WorkOrderPart.query.filter_by(work_order_id=work_order.id).delete()
+                # Paid-guard: rewriting parts recomputes material/total, so a
+                # work order with recorded customer payments needs explicit
+                # opt-in. Pure non-money edits omit 'parts' and are unaffected.
+                if (work_order.paid_amount or 0) > 0 and not data.get(
+                        'allow_paid_rewrite'):
+                    raise ValidationError(
+                        "Cannot rewrite parts on a work order with recorded "
+                        "payments. Pass allow_paid_rewrite=True to confirm.")
+
+                incoming = data.get('parts') or []
+                supplier_parts = [p for p in incoming if p.get('supplier_id')]
+                direct_parts = [p for p in incoming
+                                if not p.get('supplier_id')]
+
+                # Diff-by-id (positional: form rows carry no ids): matched
+                # linked purchases keep display_id / voucher_id /
+                # payment_status / paid_amount. Only the delta is
+                # inserted/deleted — never a bulk-delete that resets payments.
+                existing_purchases = (
+                    SupplierPurchase.query
+                    .filter_by(work_order_id=work_order.id)
+                    .order_by(SupplierPurchase.created_at,
+                              SupplierPurchase.id)
+                    .all())
 
                 parts_cost = 0.0
-                for part in (data.get('parts') or []):
+                for index, part in enumerate(supplier_parts):
                     s_id = part.get('supplier_id')
 
                     # Common part data
@@ -914,10 +938,26 @@ class SQLAlchemy(SQLAlchemy):
                     voucher_file_path = part.get('voucher_file_path') or ''
                     raw_mat_id = part.get('raw_material_id')
 
-                    if s_id:
+                    if index < len(existing_purchases):
+                        # Matched row: update details, preserve payment identity.
+                        purchase = existing_purchases[index]
+                        purchase.supplier_id = safe_int(
+                            s_id, field='supplier_id')
+                        purchase.purchase_date = work_order.job_date
+                        if part.get('voucher_no'):
+                            purchase.voucher_no = part.get('voucher_no')
+                        purchase.voucher_file_path = voucher_file_path
+                        purchase.notes = f"Project Part: {part_name}"
+                        # If file exists and voucher_no is empty, auto-fill it
+                        if (purchase.voucher_file_path
+                                and not purchase.voucher_no):
+                            purchase.voucher_no = purchase.display_id
+                        SupplierPurchaseItem.query.filter_by(
+                            purchase_id=purchase.id).delete()
+                    else:
                         purchase_display_id = generate_id(ID_PREFIX_PURCHASE)
                         voucher_no = part.get('voucher_no') or ''
-                    
+
                         if voucher_file_path and not voucher_no:
                             voucher_no = purchase_display_id
 
@@ -936,18 +976,58 @@ class SQLAlchemy(SQLAlchemy):
                         self.session.add(purchase)
                         self.session.flush()
 
-                        purchase_item = SupplierPurchaseItem(
-                            purchase_id=purchase.id,
-                            raw_material_id=raw_mat_id,
-                            product_name=part_name,
-                            specification=measurement,
-                            quantity=qty,
-                            weight=weight,
-                            unit=unit,
-                            rate_per_unit=price / qty if qty > 0 else 0,
-                            total_amount=price
-                        )
-                        self.session.add(purchase_item)
+                    purchase_item = SupplierPurchaseItem(
+                        purchase_id=purchase.id,
+                        raw_material_id=raw_mat_id,
+                        product_name=part_name,
+                        specification=measurement,
+                        quantity=qty,
+                        weight=weight,
+                        unit=unit,
+                        rate_per_unit=price / qty if qty > 0 else 0,
+                        total_amount=price
+                    )
+                    self.session.add(purchase_item)
+
+                    parts_cost += price
+
+                # Delete delta only — never silently drop a paid purchase row.
+                for stale in existing_purchases[len(supplier_parts):]:
+                    if (stale.paid_amount or 0) > 0 and not data.get(
+                            'allow_paid_rewrite'):
+                        raise ValidationError(
+                            "Cannot delete a linked purchase with recorded "
+                            "payments. Pass allow_paid_rewrite=True to "
+                            "confirm.")
+                    self.session.delete(stale)
+
+                # Direct (non-supplier) parts carry no payment identity, but
+                # still diff positionally to avoid needless row churn.
+                existing_direct = (
+                    WorkOrderPart.query
+                    .filter_by(work_order_id=work_order.id)
+                    .order_by(WorkOrderPart.id)
+                    .all())
+                for index, part in enumerate(direct_parts):
+                    part_name = part.get('part_name') or ''
+                    measurement = part.get('measurement') or ''
+                    qty = safe_float(part.get('qty'), field='qty')
+                    weight = safe_float(part.get('weight'), field='weight')
+                    unit = part.get('unit') or ''
+                    price = safe_float(part.get('price'), field='price')
+                    voucher_file_path = part.get('voucher_file_path') or ''
+                    raw_mat_id = part.get('raw_material_id')
+
+                    if index < len(existing_direct):
+                        row = existing_direct[index]
+                        row.raw_material_id = raw_mat_id
+                        row.part_name = part_name
+                        row.voucher_file_path = voucher_file_path
+                        row.measurement = measurement
+                        row.unit = unit
+                        row.qty = qty
+                        row.weight = weight
+                        row.price = price
                     else:
                         # No supplier selected, save to WorkOrderPart
                         new_part = WorkOrderPart(
@@ -964,6 +1044,9 @@ class SQLAlchemy(SQLAlchemy):
                         self.session.add(new_part)
 
                     parts_cost += price
+
+                for stale in existing_direct[len(direct_parts):]:
+                    self.session.delete(stale)
 
                 # Recompute material/total from the rebuilt parts (client values advisory).
                 work_order.material_cost = accept_or_recompute(

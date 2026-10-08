@@ -248,3 +248,203 @@ class TestAtomicTransactions:
                 purchase_id=purchase_id).count() == 2
         finally:
             self._cleanup_purchase(db, purchase_id)
+
+
+class TestWorkOrderNonDestructiveUpdate:
+    """Task 4 TDD: parts rewrite must preserve payment identity; paid WOs
+    need explicit opt-in; legacy paid>quoted rows stay editable for
+    non-money edits. Cleans up every row it creates (live test DB)."""
+
+    def _make_buyer(self, db, tag):
+        return db.add_buyer({
+            'company_name': f'T4 Buyer {tag}',
+            'address': 'Dhaka',
+            'contacts': [],
+        })
+
+    def _supplier_id(self, db):
+        shops = db.get_all_shops(limit=1)
+        if shops:
+            return shops[0]['id']
+        return db.add_shop({'name': 'T4 Supplier'})
+
+    def _part(self, supplier_id, name='Part', price=500.0, qty=1.0):
+        return {
+            'part_name': name,
+            'supplier_id': supplier_id,
+            'measurement': '',
+            'unit': 'pcs',
+            'qty': qty,
+            'weight': 0,
+            'price': price,
+            'voucher_file_path': '',
+            'raw_material_id': None,
+            'voucher_no': '',
+        }
+
+    def _make_wo(self, db, buyer_id, supplier_id, quoted=1000.0,
+                 parts=None, labor=0.0):
+        return db.add_work_order({
+            'company_id': buyer_id,
+            'job_name': 'T4 WO',
+            'quoted_price': quoted,
+            'labor_cost': labor,
+            'parts': parts if parts is not None else [
+                self._part(supplier_id)],
+        })
+
+    def _linked_purchases(self, wo_id):
+        from src.db.database import SupplierPurchase
+        return (SupplierPurchase.query
+                .filter_by(work_order_id=wo_id)
+                .order_by(SupplierPurchase.created_at,
+                          SupplierPurchase.id)
+                .all())
+
+    def _cleanup(self, db, wo_id, buyer_id):
+        from src.db.database import Buyer
+        try:
+            db.session.rollback()
+            db.delete_work_order(wo_id)
+            buyer = Buyer.query.get(buyer_id)
+            if buyer is not None:
+                db.session.delete(buyer)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    def test_update_work_order_preserves_paid(self, app_context):
+        """Parts edit must keep paid_amount + voucher identity on matched row."""
+        from src.db.database import db
+        buyer_id = self._make_buyer(db, 'paid')
+        supplier_id = self._supplier_id(db)
+        wo_id = self._make_wo(db, buyer_id, supplier_id)
+        try:
+            purchase = self._linked_purchases(wo_id)[0]
+            purchase.paid_amount = 500.0
+            purchase.payment_status = 'partial'
+            db.session.commit()
+            original = (purchase.id, purchase.display_id,
+                        purchase.voucher_id)
+
+            db.update_work_order(wo_id, {'parts': [
+                self._part(supplier_id, name='new-part', price=600.0)]})
+
+            kept = self._linked_purchases(wo_id)
+            assert len(kept) == 1
+            assert (kept[0].id, kept[0].display_id,
+                    kept[0].voucher_id) == original
+            assert kept[0].paid_amount == 500.0
+            assert kept[0].payment_status == 'partial'
+            assert kept[0].items[0].product_name == 'new-part'
+        finally:
+            self._cleanup(db, wo_id, buyer_id)
+
+    def test_non_money_edit_to_legacy_corrupt_row_succeeds(
+            self, app_context):
+        """paid>quoted legacy row: job_name fix + advisory pending_amount
+        must succeed; money-touching edit still raises until corrected."""
+        import pytest
+        from src.db.database import db, WorkOrder
+        from src.helpers.exceptions import ValidationError
+        buyer_id = self._make_buyer(db, 'legacy')
+        supplier_id = self._supplier_id(db)
+        wo_id = self._make_wo(db, buyer_id, supplier_id, quoted=100.0)
+        try:
+            # Simulate legacy corruption directly (bypasses validation).
+            wo = WorkOrder.query.get(wo_id)
+            wo.paid_amount = 500.0
+            db.session.commit()
+
+            assert db.update_work_order(
+                wo_id, {'job_name': 'fixed typo'}) is True
+            assert WorkOrder.query.get(wo_id).job_name == 'fixed typo'
+
+            # Advisory pending_amount must never trigger validation.
+            before = WorkOrder.query.get(wo_id).pending_amount
+            assert db.update_work_order(
+                wo_id, {'pending_amount': 9999}) is True
+            assert WorkOrder.query.get(wo_id).pending_amount == before
+
+            # Money-touching edit on the corrupt row still raises.
+            with pytest.raises(ValidationError):
+                db.update_work_order(wo_id, {'quoted_price': 100.0})
+        finally:
+            self._cleanup(db, wo_id, buyer_id)
+
+    def test_paid_guard_blocks_parts_rewrite(self, app_context):
+        """Parts rewrite on a WO with paid_amount>0 needs explicit opt-in."""
+        import pytest
+        from src.db.database import db, WorkOrder
+        from src.helpers.exceptions import ValidationError
+        buyer_id = self._make_buyer(db, 'guard')
+        supplier_id = self._supplier_id(db)
+        wo_id = self._make_wo(db, buyer_id, supplier_id)
+        try:
+            assert db.update_work_order(
+                wo_id, {'paid_amount': 500.0}) is True
+            with pytest.raises(ValidationError):
+                db.update_work_order(wo_id, {'parts': [
+                    self._part(supplier_id, name='guarded')]})
+
+            # Explicit opt-in allows the rewrite.
+            assert db.update_work_order(wo_id, {
+                'parts': [self._part(supplier_id, name='guarded')],
+                'allow_paid_rewrite': True}) is True
+            assert WorkOrder.query.get(wo_id) is not None
+        finally:
+            self._cleanup(db, wo_id, buyer_id)
+
+    def test_deleting_paid_purchase_needs_opt_in(self, app_context):
+        """Shrinking parts must not silently drop a paid purchase row."""
+        import pytest
+        from src.db.database import db
+        from src.helpers.exceptions import ValidationError
+        buyer_id = self._make_buyer(db, 'shrink')
+        supplier_id = self._supplier_id(db)
+        wo_id = self._make_wo(db, buyer_id, supplier_id, parts=[
+            self._part(supplier_id, name='keep-me', price=100.0),
+            self._part(supplier_id, name='paid-drop', price=200.0),
+        ])
+        try:
+            doomed = self._linked_purchases(wo_id)[1]
+            doomed.paid_amount = 200.0
+            db.session.commit()
+
+            with pytest.raises(ValidationError):
+                db.update_work_order(wo_id, {'parts': [
+                    self._part(supplier_id, name='keep-me', price=100.0)]})
+            assert len(self._linked_purchases(wo_id)) == 2
+
+            assert db.update_work_order(wo_id, {
+                'parts': [self._part(supplier_id, name='keep-me',
+                                     price=100.0)],
+                'allow_paid_rewrite': True}) is True
+            assert len(self._linked_purchases(wo_id)) == 1
+        finally:
+            self._cleanup(db, wo_id, buyer_id)
+
+    def test_service_update_omits_absent_money_keys(self, app_context):
+        """Form without money fields must leave money columns untouched."""
+        from werkzeug.datastructures import MultiDict
+        from src.db.database import db
+        import src.services.work_order as svc
+        buyer_id = self._make_buyer(db, 'svc')
+        wo_id = db.add_work_order({
+            'company_id': buyer_id,
+            'job_name': 'T4 SVC WO',
+            'quoted_price': 1000.0,
+            'labor_cost': 100.0,
+            'parts': [],
+        })
+        try:
+            form = MultiDict({'job_name': 'svc fix', 'status': 'open'})
+            assert svc.update(wo_id, form) is True
+            wo = db.get_work_order_by_id(wo_id)
+            assert wo['job_name'] == 'svc fix'
+            assert wo['quoted_price'] == 1000.0
+            assert wo['labor_cost'] == 100.0
+            assert wo['material_cost'] == 0.0
+            assert wo['total_cost'] == 100.0
+        finally:
+            self._cleanup(db, wo_id, buyer_id)
