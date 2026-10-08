@@ -1,11 +1,13 @@
 """Purchase service — business logic for supplier purchase vouchers."""
 import datetime
+from pydantic import ValidationError as PydanticValidationError
 from src.config import setup_logger, Settings
 from src.db.database import db
 from src.helpers.exceptions import ValidationError
 from src.helpers.upload import save_upload
 from src.helpers.auth import verify_delete_password
 from src.helpers.utils import safe_float
+from src.schema.purchase import PurchaseItemCreate
 
 logger = setup_logger(Settings.LOG_DIR / "services.log", name="bew.services.purchase")
 
@@ -67,6 +69,7 @@ def create(form_data, files=None):
             voucher_path = vp
 
     items = _parse_purchase_items(form_data)
+    _validate_items(items)
 
     purchase_data = {
         'supplier_id': supplier_id,
@@ -95,6 +98,7 @@ def update(purchase_id, form_data, files=None, existing_purchase=None):
             voucher_path = vp
 
     items = _parse_purchase_items(form_data)
+    _validate_items(items)
 
     purchase_data = {
         'supplier_id': form_data.get('supplier_id') or (existing_purchase or {}).get('supplier_id'),
@@ -130,6 +134,15 @@ def _parse_date(date_str: str | None):
         return datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
     except ValueError:
         raise ValidationError("Invalid date format. Use YYYY-MM-DD.")
+
+
+def _validate_items(items: list[dict]) -> None:
+    """Run parsed line items through the existing PurchaseItemCreate validators."""
+    for item in items:
+        try:
+            PurchaseItemCreate.model_validate(item)
+        except PydanticValidationError as e:
+            raise ValidationError(f"Invalid purchase item: {e.errors()[0]['msg']}") from None
 
 
 def _parse_purchase_items(form_data) -> list[dict]:

@@ -98,6 +98,65 @@ class TestSaleService:
         assert result is None
 
 
+class TestMoneyRecompute:
+    """Task 3: server-side money recompute helpers (src/helpers/utils.py)."""
+
+    def test_purchase_total_ignores_client_total(self):
+        from src.helpers.utils import compute_totals
+        total = compute_totals([{"quantity": 2, "rate": 100, "total_amount": 9999}])
+        assert total == 200.0
+
+    def test_pending_derived(self):
+        import pytest as _pytest
+        from src.helpers.utils import derive_pending
+        from src.helpers.exceptions import ValidationError
+        assert derive_pending(quoted=1000, paid=300) == 700.0
+        with _pytest.raises(ValidationError):
+            derive_pending(quoted=1000, paid=1500)
+
+    def test_sale_total_ignores_client_total_price(self):
+        from src.helpers.utils import compute_totals
+        total = compute_totals([{"quantity": 3, "unit_price": 50, "total_price": 1}])
+        assert total == 150.0
+
+    def test_client_total_accepted_within_tolerance(self):
+        from src.helpers.utils import compute_totals
+        # Rounding-level agreement (<= 0.01) keeps the client value.
+        total = compute_totals([{"quantity": 3, "rate": 10.003, "total_amount": 30.01}])
+        assert total == 30.01
+
+    def test_pending_rejects_negative_paid(self):
+        import pytest as _pytest
+        from src.helpers.utils import derive_pending
+        from src.helpers.exceptions import ValidationError
+        with _pytest.raises(ValidationError):
+            derive_pending(quoted=1000, paid=-5)
+
+    def test_sale_write_path_recomputes_total(self, app_context):
+        """DB write path must ignore advisory client totals (cleanup after)."""
+        from src.db.database import db
+        buyers = db.get_all_buyers()
+        if not buyers:
+            pytest.skip("no buyers in dev DB")
+        sale_id = None
+        try:
+            sale_id = db.add_sale({
+                'buyer_id': buyers[0]['id'],
+                'sale_date': None,
+                'items': [
+                    {'product_name': 'T3 probe', 'quantity': 2, 'unit_price': 100,
+                     'total_price': 9999, 'weight': 0},
+                ],
+                'total_amount': 9999,
+            })
+            sale = db.get_sale_by_id(sale_id)
+            assert sale['total_amount'] == 200.0
+            assert sale['items'][0]['total_price'] == 200.0
+        finally:
+            if sale_id is not None:
+                db.delete_sale(sale_id)
+
+
 class TestWorkOrderService:
     """Verify work order service functions."""
 

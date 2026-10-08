@@ -5,6 +5,7 @@ from src.db.database import db
 from src.helpers.exceptions import ValidationError
 from src.helpers.upload import save_upload
 from src.helpers.auth import verify_delete_password
+from src.helpers.utils import safe_float
 
 logger = setup_logger(Settings.LOG_DIR / "services.log", name="bew.services.work_order")
 
@@ -65,11 +66,11 @@ def create(form_data, files=None):
         'job_name': form_data.get('job_name'),
         'job_description': form_data.get('job_description'),
         'status': form_data.get('status'),
-        'quoted_price': form_data.get('quoted_price'),
+        'quoted_price': safe_float(form_data.get('quoted_price'), field='quoted_price'),
         'delivery_date': delivery_date,
-        'labor_cost': form_data.get('labor_cost'),
-        'material_cost': form_data.get('material_cost'),
-        'total_cost': form_data.get('total_cost'),
+        'labor_cost': safe_float(form_data.get('labor_cost'), field='labor_cost'),
+        'material_cost': safe_float(form_data.get('material_cost'), field='material_cost'),
+        'total_cost': safe_float(form_data.get('total_cost'), field='total_cost'),
         'hard_copy_path': hard_copy_path,
         'parts': parts,
         'documents': documents,
@@ -94,11 +95,11 @@ def update(work_order_id, form_data, files=None):
         'job_name': form_data.get('job_name'),
         'job_description': form_data.get('job_description'),
         'status': form_data.get('status'),
-        'quoted_price': form_data.get('quoted_price'),
+        'quoted_price': safe_float(form_data.get('quoted_price'), field='quoted_price'),
         'delivery_date': delivery_date,
-        'labor_cost': form_data.get('labor_cost'),
-        'material_cost': form_data.get('material_cost'),
-        'total_cost': form_data.get('total_cost'),
+        'labor_cost': safe_float(form_data.get('labor_cost'), field='labor_cost'),
+        'material_cost': safe_float(form_data.get('material_cost'), field='material_cost'),
+        'total_cost': safe_float(form_data.get('total_cost'), field='total_cost'),
         'hard_copy_path': hard_copy_path,
         'parts': parts,
         'documents': documents,
@@ -163,9 +164,9 @@ def _parse_parts(form_data, files=None) -> list[dict]:
             'voucher_file_path': voucher_path,
             'measurement': measurements[i] if i < len(measurements) else '',
             'unit': units[i] if i < len(units) else '',
-            'qty': qtys[i] if i < len(qtys) else 0,
-            'weight': weights[i] if i < len(weights) else 0,
-            'price': prices[i] if i < len(prices) else 0,
+            'qty': safe_float(qtys[i], field='qty') if i < len(qtys) else 0,
+            'weight': safe_float(weights[i], field='weight') if i < len(weights) else 0,
+            'price': safe_float(prices[i], field='price') if i < len(prices) else 0,
         })
 
     return parts

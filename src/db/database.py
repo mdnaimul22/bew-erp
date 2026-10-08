@@ -12,7 +12,7 @@ logger = setup_logger(Settings.LOG_DIR / "db.log", name="bew.db.database")
 # Search Service Imports
 from src.helpers.semantic import SemanticSearch
 from src.helpers.engine import normalize_text, tokenize, calculate_score
-from src.helpers.utils import safe_int
+from src.helpers.utils import safe_float, safe_int, accept_or_recompute, compute_totals, derive_pending
 
 
 class SQLAlchemy(SQLAlchemy):
@@ -498,21 +498,24 @@ class SQLAlchemy(SQLAlchemy):
             total = 0
             if 'items' in data:
                 for item in data['items']:
-                    line_total = float(item.get('quantity', 0)) * float(item.get('unit_price', 0))
+                    qty = safe_float(item.get('quantity'), field='quantity')
+                    unit = safe_float(item.get('unit_price'), field='unit_price')
+                    line_total = accept_or_recompute(qty * unit, item.get('total_price'))
+
                     total += line_total
 
                     new_item = SaleItem(
                         sale_id=new_sale.id,
                         product_name=item.get('product_name'),
-                        quantity=item.get('quantity', 0),
-                        unit_price=item.get('unit_price', 0),
+                        quantity=qty,
+                        unit_price=unit,
                         total_price=line_total,
-                        weight=item.get('weight', 0),
+                        weight=safe_float(item.get('weight'), field='weight'),
                         inventory_link_id=item.get('inventory_link_id')
                     )
                     self.session.add(new_item)
 
-            new_sale.total_amount = total
+            new_sale.total_amount = accept_or_recompute(total, data.get('total_amount'))
             self.session.commit()
             return new_sale.id
         except Exception:
@@ -535,21 +538,24 @@ class SQLAlchemy(SQLAlchemy):
             total = 0
             if 'items' in data:
                 for item in data['items']:
-                    line_total = float(item.get('quantity', 0)) * float(item.get('unit_price', 0))
+                    qty = safe_float(item.get('quantity'), field='quantity')
+                    unit = safe_float(item.get('unit_price'), field='unit_price')
+                    line_total = accept_or_recompute(qty * unit, item.get('total_price'))
+
                     total += line_total
 
                     new_item = SaleItem(
                         sale_id=sale.id,
                         product_name=item.get('product_name'),
-                        quantity=item.get('quantity', 0),
-                        unit_price=item.get('unit_price', 0),
+                        quantity=qty,
+                        unit_price=unit,
                         total_price=line_total,
-                        weight=item.get('weight', 0),
+                        weight=safe_float(item.get('weight'), field='weight'),
                         inventory_link_id=item.get('inventory_link_id')
                     )
                     self.session.add(new_item)
 
-            sale.total_amount = total
+            sale.total_amount = accept_or_recompute(total, data.get('total_amount'))
             sale.updated_at = datetime.datetime.now()
             self.session.commit()
             return True
@@ -600,7 +606,7 @@ class SQLAlchemy(SQLAlchemy):
                 voucher_file_path=voucher_file_path,
                 work_order_id=data.get('work_order_id'),
                 payment_status=data.get('payment_status') or 'pending',
-                paid_amount=float(data.get('paid_amount') or 0),
+                paid_amount=safe_float(data.get('paid_amount'), field='paid_amount'),
                 notes=data.get('notes') or ''
             )
             self.session.add(purchase)
@@ -608,16 +614,16 @@ class SQLAlchemy(SQLAlchemy):
 
             items = data.get('items') or []
             for item in items:
-                qty = float(item.get('quantity') or 0)
-                rate = float(item.get('rate_per_unit') or 0)
-                total = float(item.get('total_amount') or (qty * rate))
+                qty = safe_float(item.get('quantity'), field='quantity')
+                rate = safe_float(item.get('rate_per_unit'), field='rate_per_unit')
+                total = accept_or_recompute(qty * rate, item.get('total_amount'))
                 purchase_item = SupplierPurchaseItem(
                     purchase_id=purchase.id,
                     raw_material_id=item.get('raw_material_id'),  # Link to master material
                     product_name=item.get('product_name') or '',
                     specification=item.get('specification') or '',
                     quantity=qty,
-                    weight=float(item.get('weight') or 0),
+                    weight=safe_float(item.get('weight'), field='weight'),
                     unit=item.get('unit') or '',
                     rate_per_unit=rate,
                     total_amount=total
@@ -637,7 +643,7 @@ class SQLAlchemy(SQLAlchemy):
 
         try:
             if 'supplier_id' in data and data.get('supplier_id') is not None:
-                purchase.supplier_id = int(data.get('supplier_id'))
+                purchase.supplier_id = safe_int(data.get('supplier_id'), field='supplier_id')
 
             if 'purchase_date' in data and data.get('purchase_date') is not None:
                 purchase.purchase_date = data.get('purchase_date')
@@ -656,7 +662,7 @@ class SQLAlchemy(SQLAlchemy):
                 purchase.payment_status = data.get('payment_status') or 'pending'
 
             if 'paid_amount' in data:
-                purchase.paid_amount = float(data.get('paid_amount') or 0)
+                purchase.paid_amount = safe_float(data.get('paid_amount'), field='paid_amount')
 
             if 'notes' in data:
                 purchase.notes = data.get('notes') or ''
@@ -669,16 +675,16 @@ class SQLAlchemy(SQLAlchemy):
             if 'items' in data:
                 SupplierPurchaseItem.query.filter_by(purchase_id=purchase_id).delete()
                 for item in (data.get('items') or []):
-                    qty = float(item.get('quantity') or 0)
-                    rate = float(item.get('rate_per_unit') or 0)
-                    total = float(item.get('total_amount') or (qty * rate))
+                    qty = safe_float(item.get('quantity'), field='quantity')
+                    rate = safe_float(item.get('rate_per_unit'), field='rate_per_unit')
+                    total = accept_or_recompute(qty * rate, item.get('total_amount'))
                     purchase_item = SupplierPurchaseItem(
                         purchase_id=purchase.id,
                         raw_material_id=item.get('raw_material_id'),
                         product_name=item.get('product_name') or '',
                         specification=item.get('specification') or '',
                         quantity=qty,
-                        weight=float(item.get('weight') or 0),
+                        weight=safe_float(item.get('weight'), field='weight'),
                         unit=item.get('unit') or '',
                         rate_per_unit=rate,
                         total_amount=total
@@ -714,6 +720,15 @@ class SQLAlchemy(SQLAlchemy):
     def add_work_order(self, data):
         try:
             wo_id = generate_id(ID_PREFIX_WORK_ORDER)
+            quoted = safe_float(data.get('quoted_price'), field='quoted_price')
+            paid = safe_float(data.get('paid_amount'), field='paid_amount')
+            labor = safe_float(data.get('labor_cost'), field='labor_cost')
+            parts = data.get('parts') or []
+            material = compute_totals(parts) if 'parts' in data else safe_float(
+                data.get('material_cost'), field='material_cost')
+            material = accept_or_recompute(material, data.get('material_cost'))
+            total = accept_or_recompute(
+                labor + material, data.get('total_cost'))
             work_order = WorkOrder(
                 id=wo_id,
                 display_id=wo_id,
@@ -724,30 +739,29 @@ class SQLAlchemy(SQLAlchemy):
                 job_description=data.get('job_description') or '',
                 status=data.get('status') or 'open',
                 payment_status=data.get('payment_status') or 'pending',
-                paid_amount=float(data.get('paid_amount') or 0),
-                pending_amount=float(data.get('pending_amount') or 0),
-                quoted_price=float(data.get('quoted_price') or 0),
+                paid_amount=paid,
+                pending_amount=derive_pending(quoted, paid),
+                quoted_price=quoted,
                 delivery_date=data.get('delivery_date'),
-                labor_cost=float(data.get('labor_cost') or 0),
-                material_cost=float(data.get('material_cost') or 0),
-                total_cost=float(data.get('total_cost') or 0),
+                labor_cost=labor,
+                material_cost=material,
+                total_cost=total,
                 hard_copy_path=data.get('hard_copy_path') or '',
                 notes=data.get('notes') or ''
             )
             self.session.add(work_order)
             self.session.flush()
 
-            parts = data.get('parts') or []
             for part in parts:
                 s_id = part.get('supplier_id')
-            
+
                 # Common part data
                 part_name = part.get('part_name') or ''
                 measurement = part.get('measurement') or ''
-                qty = float(part.get('qty') or 0)
-                weight = float(part.get('weight') or 0)
+                qty = safe_float(part.get('qty'), field='qty')
+                weight = safe_float(part.get('weight'), field='weight')
                 unit = part.get('unit') or ''
-                price = float(part.get('price') or 0)
+                price = safe_float(part.get('price'), field='price')
                 voucher_file_path = part.get('voucher_file_path') or ''
                 raw_mat_id = part.get('raw_material_id')
 
@@ -763,7 +777,7 @@ class SQLAlchemy(SQLAlchemy):
                     purchase = SupplierPurchase(
                         display_id=purchase_display_id,
                         voucher_id=generate_id(ID_PREFIX_VOUCHER_PURCHASE),
-                        supplier_id=int(s_id),
+                        supplier_id=safe_int(s_id, field='supplier_id'),
                         purchase_date=work_order.job_date,
                         voucher_no=voucher_no,
                         voucher_file_path=voucher_file_path,
@@ -784,7 +798,7 @@ class SQLAlchemy(SQLAlchemy):
                         quantity=qty,
                         weight=weight,
                         unit=unit,
-                        rate_per_unit=price / qty if qty > 0 else price,
+                        rate_per_unit=price / qty if qty > 0 else 0,
                         total_amount=price
                     )
                     self.session.add(purchase_item)
@@ -830,7 +844,7 @@ class SQLAlchemy(SQLAlchemy):
 
         try:
             if 'company_id' in data and data.get('company_id') is not None:
-                work_order.company_id = int(data.get('company_id'))
+                work_order.company_id = safe_int(data.get('company_id'), field='company_id')
 
             if 'job_date' in data and data.get('job_date') is not None:
                 work_order.job_date = data.get('job_date')
@@ -848,25 +862,30 @@ class SQLAlchemy(SQLAlchemy):
                 work_order.payment_status = data.get('payment_status') or 'pending'
 
             if 'paid_amount' in data:
-                work_order.paid_amount = float(data.get('paid_amount') or 0)
-
-            if 'pending_amount' in data:
-                work_order.pending_amount = float(data.get('pending_amount') or 0)
+                work_order.paid_amount = safe_float(data.get('paid_amount'), field='paid_amount')
 
             if 'quoted_price' in data:
-                work_order.quoted_price = float(data.get('quoted_price') or 0)
+                work_order.quoted_price = safe_float(data.get('quoted_price'), field='quoted_price')
+
+            if any(k in data for k in ('quoted_price', 'paid_amount', 'pending_amount')):
+                # Client pending_amount is advisory only — always derived server-side.
+                work_order.pending_amount = derive_pending(
+                    work_order.quoted_price or 0, work_order.paid_amount or 0)
 
             if 'delivery_date' in data:
                 work_order.delivery_date = data.get('delivery_date')
 
             if 'labor_cost' in data:
-                work_order.labor_cost = float(data.get('labor_cost') or 0)
+                work_order.labor_cost = safe_float(data.get('labor_cost'), field='labor_cost')
 
             if 'material_cost' in data:
-                work_order.material_cost = float(data.get('material_cost') or 0)
+                work_order.material_cost = safe_float(data.get('material_cost'), field='material_cost')
 
-            if 'total_cost' in data:
-                work_order.total_cost = float(data.get('total_cost') or 0)
+            if 'total_cost' in data or 'labor_cost' in data or 'material_cost' in data:
+                # Server recomputes total = labor + material; client value is advisory.
+                work_order.total_cost = accept_or_recompute(
+                    (work_order.labor_cost or 0) + (work_order.material_cost or 0),
+                    data.get('total_cost') if 'total_cost' in data else None)
 
             if 'hard_copy_path' in data:
                 work_order.hard_copy_path = data.get('hard_copy_path') or ''
@@ -880,17 +899,18 @@ class SQLAlchemy(SQLAlchemy):
                 # Cleanup existing linked purchases and parts for this work order
                 SupplierPurchase.query.filter_by(work_order_id=work_order.id).delete()
                 WorkOrderPart.query.filter_by(work_order_id=work_order.id).delete()
-            
+
+                parts_cost = 0.0
                 for part in (data.get('parts') or []):
                     s_id = part.get('supplier_id')
-                
+
                     # Common part data
                     part_name = part.get('part_name') or ''
                     measurement = part.get('measurement') or ''
-                    qty = float(part.get('qty') or 0)
-                    weight = float(part.get('weight') or 0)
+                    qty = safe_float(part.get('qty'), field='qty')
+                    weight = safe_float(part.get('weight'), field='weight')
                     unit = part.get('unit') or ''
-                    price = float(part.get('price') or 0)
+                    price = safe_float(part.get('price'), field='price')
                     voucher_file_path = part.get('voucher_file_path') or ''
                     raw_mat_id = part.get('raw_material_id')
 
@@ -904,7 +924,7 @@ class SQLAlchemy(SQLAlchemy):
                         purchase = SupplierPurchase(
                             display_id=purchase_display_id,
                             voucher_id=generate_id(ID_PREFIX_VOUCHER_PURCHASE),
-                            supplier_id=int(s_id),
+                            supplier_id=safe_int(s_id, field='supplier_id'),
                             purchase_date=work_order.job_date,
                             voucher_no=voucher_no,
                             voucher_file_path=voucher_file_path,
@@ -924,7 +944,7 @@ class SQLAlchemy(SQLAlchemy):
                             quantity=qty,
                             weight=weight,
                             unit=unit,
-                            rate_per_unit=price / qty if qty > 0 else price,
+                            rate_per_unit=price / qty if qty > 0 else 0,
                             total_amount=price
                         )
                         self.session.add(purchase_item)
@@ -942,6 +962,15 @@ class SQLAlchemy(SQLAlchemy):
                             price=price
                         )
                         self.session.add(new_part)
+
+                    parts_cost += price
+
+                # Recompute material/total from the rebuilt parts (client values advisory).
+                work_order.material_cost = accept_or_recompute(
+                    parts_cost, data.get('material_cost'))
+                work_order.total_cost = accept_or_recompute(
+                    (work_order.labor_cost or 0) + work_order.material_cost,
+                    data.get('total_cost'))
 
                 # Update Gallery Documents
                 # Simple approach: delete all and re-add (like parts)

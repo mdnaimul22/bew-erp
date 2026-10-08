@@ -1,11 +1,13 @@
 """Sale service — business logic for customer invoice/sales management."""
 import datetime
+from pydantic import ValidationError as PydanticValidationError
 from src.config import setup_logger, Settings
 from src.db.database import db
 from src.helpers.exceptions import ValidationError
 from src.helpers.upload import save_upload
 from src.helpers.auth import verify_delete_password
 from src.helpers.utils import safe_float
+from src.schema.sale import SaleItemCreate
 
 logger = setup_logger(Settings.LOG_DIR / "services.log", name="bew.services.sale")
 
@@ -53,6 +55,7 @@ def create(form_data, files=None):
         voucher_filename = save_upload(files['voucher_image'], 'sales_voucher')
 
     items = _parse_sale_items(form_data)
+    _validate_items(items)
     parsed_date = _parse_date(form_data.get('sale_date'))
 
     sale_data = {
@@ -76,6 +79,7 @@ def update(sale_id: int, form_data, files=None, existing_sale=None):
             voucher_filename = vf
 
     items = _parse_sale_items(form_data)
+    _validate_items(items)
     parsed_date = _parse_date(form_data.get('sale_date'))
 
     sale_data = {
@@ -108,6 +112,15 @@ def _parse_date(date_str: str | None):
         return datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
     except ValueError:
         raise ValidationError("Invalid date format. Use YYYY-MM-DD.")
+
+
+def _validate_items(items: list[dict]) -> None:
+    """Run parsed line items through the existing SaleItemCreate validators."""
+    for item in items:
+        try:
+            SaleItemCreate.model_validate(item)
+        except PydanticValidationError as e:
+            raise ValidationError(f"Invalid sale item: {e.errors()[0]['msg']}") from None
 
 
 def _parse_sale_items(form_data) -> list[dict]:

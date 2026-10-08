@@ -29,6 +29,106 @@ def safe_int(raw: str | None, field: str) -> int:
         raise ValidationError(f"Invalid number for '{field}'.") from None
 
 
+# --- Server-side money recompute (Task 3: ERP hardening) ---
+# Client-supplied line/invoice totals are advisory only. The server recomputes
+# every total as quantity x rate and accepts a client value solely when it
+# agrees with the recomputed figure within 0.01 (rounding tolerance).
+
+_QTY_KEYS = ("quantity", "qty")
+_RATE_KEYS = ("rate", "rate_per_unit", "unit_price")
+_LINE_TOTAL_KEYS = ("total_amount", "total_price", "price")
+
+_ADVISORY_TOLERANCE = 0.01
+
+
+def _coerce_money(value, field: str) -> float:
+    """Coerce a qty/rate value to float; empty/None → 0.0, garbage → ValidationError."""
+    if value is None:
+        return 0.0
+    if isinstance(value, str) and not value.strip():
+        return 0.0
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        raise ValidationError(f"Invalid number for '{field}'.") from None
+
+
+def _first_present(item: dict, keys: tuple) -> object:
+    """Return the first present (non-None) value for keys, else None."""
+    for key in keys:
+        if key in item and item[key] is not None:
+            val = item[key]
+            if isinstance(val, str) and not val.strip():
+                continue
+            return val
+    return None
+
+
+def line_total(item: dict) -> float:
+    """Recompute one line total as qty x rate, ignoring advisory client totals.
+
+    Falls back to the client line total when no qty/rate pair is present
+    (e.g. work-order parts carry ``price`` as the line total, not a unit rate).
+    A client total that agrees with the recomputed figure within 0.01 is kept
+    so rounding is preserved; anything further off is discarded.
+    """
+    qty_raw = _first_present(item, _QTY_KEYS)
+    rate_raw = _first_present(item, _RATE_KEYS)
+    client_raw = _first_present(item, _LINE_TOTAL_KEYS)
+
+    if qty_raw is not None and rate_raw is not None:
+        recomputed = _coerce_money(qty_raw, 'quantity') * _coerce_money(rate_raw, 'rate')
+        if client_raw is not None:
+            try:
+                client = float(client_raw)
+            except (ValueError, TypeError):
+                return recomputed
+            if abs(client - recomputed) <= _ADVISORY_TOLERANCE:
+                return client
+        return recomputed
+
+    if client_raw is not None:
+        return _coerce_money(client_raw, 'total_amount')
+    return 0.0
+
+
+def compute_totals(items: list[dict]) -> float:
+    """Recompute an invoice total as the sum of server-side line totals."""
+    return float(sum(line_total(item) for item in (items or [])))
+
+
+def accept_or_recompute(recomputed: float, client_raw) -> float:
+    """Keep an advisory client total iff it is within 0.01 of recomputed."""
+    if client_raw is None:
+        return float(recomputed)
+    if isinstance(client_raw, str) and not client_raw.strip():
+        return float(recomputed)
+    try:
+        client = float(client_raw)
+    except (ValueError, TypeError):
+        return float(recomputed)
+    if abs(client - float(recomputed)) <= _ADVISORY_TOLERANCE:
+        return client
+    return float(recomputed)
+
+
+def derive_pending(quoted, paid) -> float:
+    """Derive ``pending = quoted - paid``; paid must satisfy ``0 <= paid <= quoted``.
+
+    Raises:
+        ValidationError: if paid is negative or exceeds quoted.
+    """
+    quoted_amount = _coerce_money(quoted, 'quoted_price')
+    paid_amount = _coerce_money(paid, 'paid_amount')
+    if quoted_amount < 0:
+        raise ValidationError("Quoted price cannot be negative.")
+    if paid_amount < 0:
+        raise ValidationError("Paid amount cannot be negative.")
+    if paid_amount > quoted_amount:
+        raise ValidationError("Paid amount cannot exceed quoted price.")
+    return float(quoted_amount - paid_amount)
+
+
 def parse_tags(tags_string: str) -> list[dict]:
     """Parse a comma-separated tags string into a list of dicts."""
     if not tags_string:
