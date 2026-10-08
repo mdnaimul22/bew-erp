@@ -12,6 +12,7 @@ logger = setup_logger(Settings.LOG_DIR / "db.log", name="bew.db.database")
 # Search Service Imports
 from src.helpers.semantic import SemanticSearch
 from src.helpers.engine import normalize_text, tokenize, calculate_score
+from src.helpers.utils import safe_int
 
 
 class SQLAlchemy(SQLAlchemy):
@@ -531,7 +532,7 @@ class SQLAlchemy(SQLAlchemy):
         purchase = SupplierPurchase(
             display_id=display_id,
             voucher_id=generate_id(ID_PREFIX_VOUCHER_PURCHASE),
-            supplier_id=int(data.get('supplier_id')),
+            supplier_id=safe_int(data.get('supplier_id'), field='supplier_id'),
             purchase_date=data.get('purchase_date') or datetime.date.today(),
             voucher_no=voucher_no,
             voucher_file_path=voucher_file_path,
@@ -643,7 +644,7 @@ class SQLAlchemy(SQLAlchemy):
             id=wo_id,
             display_id=wo_id,
             voucher_id=generate_id(ID_PREFIX_VOUCHER_WORK_ORDER),
-            company_id=int(data.get('company_id')),
+            company_id=safe_int(data.get('company_id'), field='company_id'),
             job_date=data.get('job_date') or datetime.date.today(),
             job_name=data.get('job_name') or '',
             job_description=data.get('job_description') or '',
@@ -1210,7 +1211,7 @@ class Buyer(db.Model):
             'display_id': self.display_id,
             'company_name': self.company_name,
             'address': self.address,
-            'created_at': self.created_at.isoformat(),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
             'contacts': [c.to_dict() for c in self.contacts]
         }
 

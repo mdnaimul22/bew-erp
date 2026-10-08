@@ -5,6 +5,7 @@ from src.db.database import db
 from src.helpers.exceptions import ValidationError
 from src.helpers.upload import save_upload
 from src.helpers.auth import verify_delete_password
+from src.helpers.utils import safe_float
 
 logger = setup_logger(Settings.LOG_DIR / "services.log", name="bew.services.sale")
 
@@ -123,9 +124,9 @@ def _parse_sale_items(form_data) -> list[dict]:
             continue
         items.append({
             'product_name': product_names[i],
-            'quantity': float(quantities[i] or 0) if i < len(quantities) else 0,
-            'unit_price': float(unit_prices[i] or 0) if i < len(unit_prices) else 0,
-            'weight': float(weights[i] or 0) if i < len(weights) else 0,
+            'quantity': safe_float(quantities[i], field='quantity') if i < len(quantities) else 0,
+            'unit_price': safe_float(unit_prices[i], field='unit_price') if i < len(unit_prices) else 0,
+            'weight': safe_float(weights[i], field='weight') if i < len(weights) else 0,
             'inventory_link_id': inventory_links[i] if i < len(inventory_links) and inventory_links[i] else None,
         })
 

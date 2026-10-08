@@ -1,7 +1,32 @@
 """General utility functions for the BEW application."""
 from src.config import Settings, setup_logger
+from src.helpers.exceptions import ValidationError
 
 logger = setup_logger(Settings.LOG_DIR / "helpers.log", name="bew.helpers.utils")
+
+
+def safe_float(raw: str | None, field: str) -> float:
+    """Coerce form input to float; empty/None → 0.0, garbage → ValidationError."""
+    if raw is None:
+        return 0.0
+    if isinstance(raw, str) and not raw.strip():
+        return 0.0
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        raise ValidationError(f"Invalid number for '{field}'.") from None
+
+
+def safe_int(raw: str | None, field: str) -> int:
+    """Coerce form input to int; empty/None → 0, garbage → ValidationError."""
+    if raw is None:
+        return 0
+    if isinstance(raw, str) and not raw.strip():
+        return 0
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        raise ValidationError(f"Invalid number for '{field}'.") from None
 
 
 def parse_tags(tags_string: str) -> list[dict]:

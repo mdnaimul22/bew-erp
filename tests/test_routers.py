@@ -169,3 +169,13 @@ class TestErrorHandlers:
         """POST to a GET-only endpoint should return 405."""
         resp = client.post('/api/search')
         assert resp.status_code == 405
+
+    def test_405_handler_redirects_to_existing_endpoint(self, client):
+        """405 HTML handler must redirect to a registered endpoint (shops.index)."""
+        resp = client.get('/')
+        assert resp.status_code == 200
+        import inspect
+        from main import method_not_allowed, ratelimit_handler
+        assert 'shops.index' in inspect.getsource(method_not_allowed)
+        assert 'core.index' not in inspect.getsource(method_not_allowed)
+        assert 'core.index' not in inspect.getsource(ratelimit_handler)

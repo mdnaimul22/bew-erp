@@ -111,14 +111,14 @@ def server_error(e):
 def method_not_allowed(e):
     if request.path.startswith('/api/'):
         return jsonify({'error': 'Method not allowed'}), 405
-    return redirect(url_for('core.index'))
+    return redirect(url_for('shops.index'))
 
 @app.errorhandler(429)
 def ratelimit_handler(e):
     if request.path.startswith('/api/'):
         return jsonify({'error': 'Rate limit exceeded', 'retry_after': e.description}), 429
     flash(_('Too many requests. Please wait a moment.'), 'error')
-    return redirect(request.referrer or url_for('core.index'))
+    return redirect(request.referrer or url_for('shops.index'))
 
 # ── DB setup ─────────────────────────────────────────────────
 with app.app_context():

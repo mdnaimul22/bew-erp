@@ -5,6 +5,7 @@ from src.db.database import db
 from src.helpers.exceptions import ValidationError
 from src.helpers.upload import save_upload
 from src.helpers.auth import verify_delete_password
+from src.helpers.utils import safe_float
 
 logger = setup_logger(Settings.LOG_DIR / "services.log", name="bew.services.purchase")
 
@@ -144,8 +145,8 @@ def _parse_purchase_items(form_data) -> list[dict]:
     for i in range(len(product_names)):
         if not product_names[i]:
             continue
-        qty = float(quantities[i] or 0) if i < len(quantities) else 0
-        rate = float(rates[i] or 0) if i < len(rates) else 0
+        qty = safe_float(quantities[i], field='quantity') if i < len(quantities) else 0
+        rate = safe_float(rates[i], field='rate_per_unit') if i < len(rates) else 0
         items.append({
             'product_name': product_names[i],
             'specification': specifications[i] if i < len(specifications) else '',

@@ -1,7 +1,7 @@
 """Shop routes — thin HTTP wrapper over shop service."""
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from flask_babel import _
-from src.helpers.utils import paginate_list
+from src.helpers.utils import paginate_list, safe_int
 from src.services import shop as shop_service
 from src.helpers.exceptions import ValidationError
 from src.config import setup_logger, Settings
@@ -218,7 +218,7 @@ def api_add_shop_tag(shop_id):
     if not tag_id:
         return jsonify({'error': 'tag_id is required'}), 400
     try:
-        shop_tag_id = shop_service.add_shop_tag(shop_id, int(tag_id))
+        shop_tag_id = shop_service.add_shop_tag(shop_id, safe_int(tag_id, field='tag_id'))
         return jsonify({'success': True, 'shop_tag_id': shop_tag_id})
     except Exception as e:
         return jsonify({'error': str(e)}), 400
@@ -231,7 +231,11 @@ def api_remove_shop_tag(shop_id):
     tag_id = data.get('tag_id')
     if not tag_id:
         return jsonify({'error': 'tag_id is required'}), 400
-    if shop_service.remove_shop_tag(shop_id, int(tag_id)):
+    try:
+        tag_id_int = safe_int(tag_id, field='tag_id')
+    except ValidationError as e:
+        return jsonify({'error': str(e)}), 400
+    if shop_service.remove_shop_tag(shop_id, tag_id_int):
         return jsonify({'success': True})
     return jsonify({'error': 'Tag not found on shop'}), 404
 

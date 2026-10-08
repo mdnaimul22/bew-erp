@@ -126,6 +126,48 @@ class TestUtils:
         assert result[0]['value'] == 'steel'
 
 
+class TestSafeCoercion:
+    """Verify safe_float/safe_int crash guards."""
+
+    def test_safe_float_rejects_garbage(self):
+        import pytest
+        from src.helpers.utils import safe_float
+        from src.helpers.exceptions import ValidationError
+        with pytest.raises(ValidationError):
+            safe_float("abc", field="quantity")
+
+    def test_safe_int_rejects_garbage(self):
+        import pytest
+        from src.helpers.utils import safe_int
+        from src.helpers.exceptions import ValidationError
+        with pytest.raises(ValidationError):
+            safe_int("abc", field="supplier_id")
+
+    def test_safe_float_empty_returns_zero(self):
+        from src.helpers.utils import safe_float
+        assert safe_float("", field="quantity") == 0.0
+        assert safe_float(None, field="quantity") == 0.0
+
+    def test_safe_int_empty_returns_zero(self):
+        from src.helpers.utils import safe_int
+        assert safe_int("", field="supplier_id") == 0
+        assert safe_int(None, field="supplier_id") == 0
+
+    def test_safe_float_valid(self):
+        from src.helpers.utils import safe_float
+        assert safe_float("2.5", field="quantity") == 2.5
+        assert safe_float(" 3 ", field="quantity") == 3.0
+
+    def test_safe_int_valid(self):
+        from src.helpers.utils import safe_int
+        assert safe_int("42", field="supplier_id") == 42
+
+    def test_buyer_to_dict_none_date(self):
+        from src.db.database import Buyer
+        b = Buyer(company_name="x", created_at=None)
+        assert b.to_dict()["created_at"] is None
+
+
 class TestRetry:
     """Verify retry decorator."""
 
