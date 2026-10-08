@@ -12,7 +12,7 @@ from src.schema.purchase import PurchaseItemCreate
 logger = setup_logger(Settings.LOG_DIR / "services.log", name="bew.services.purchase")
 
 
-def list_all(query: str = ''):
+def list_all(query: str = '', limit: int = 1000, offset: int = 0):
     """Return all supplier purchases, optionally filtered."""
     if query:
         from src.db.database import SupplierPurchase, Shop
@@ -24,10 +24,10 @@ def list_all(query: str = ''):
                 SupplierPurchase.notes.ilike(f'%{query}%'),
                 Shop.name.ilike(f'%{query}%')
             )
-        ).order_by(SupplierPurchase.purchase_date.desc()).all()
+        ).order_by(SupplierPurchase.purchase_date.desc()).limit(limit).offset(offset).all()
         return [p.to_dict() for p in items]
-        
-    return db.get_all_supplier_purchases()
+
+    return db.get_all_supplier_purchases(limit=limit, offset=offset)
 
 
 def list_by_supplier(shop_id: int):

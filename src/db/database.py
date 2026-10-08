@@ -1,4 +1,5 @@
 import datetime
+import time
 import uuid
 import json
 from flask import url_for
@@ -9,6 +10,21 @@ from src.config import Settings, setup_logger, read_json, exists
 
 logger = setup_logger(Settings.LOG_DIR / "db.log", name="bew.db.database")
 
+# Category cache (Task 5: every-page tax). Template globals call
+# get_all_categories() on every request; categories change rarely, so
+# cache the serialized list briefly. Must be invalidated on any write
+# (add_category, import_from_json).
+_CATEGORIES_CACHE_TTL = 60.0
+_categories_cache_data = None
+_categories_cache_ts = 0.0
+
+
+def _invalidate_categories_cache():
+    """Drop the cached category list after a category write."""
+    global _categories_cache_data, _categories_cache_ts
+    _categories_cache_data = None
+    _categories_cache_ts = 0.0
+
 # Search Service Imports
 from src.helpers.semantic import SemanticSearch
 from src.helpers.engine import normalize_text, tokenize, calculate_score
@@ -18,8 +34,19 @@ from src.helpers.exceptions import ValidationError
 
 class SQLAlchemy(SQLAlchemy):
     def get_all_categories(self):
+        # Every-page tax cut: template globals fetch categories on each
+        # request, so serve a short-TTL cache. Invalidated on write
+        # (add_category / import_from_json below).
+        global _categories_cache_data, _categories_cache_ts
+        now = time.monotonic()
+        if (_categories_cache_data is not None
+                and (now - _categories_cache_ts) < _CATEGORIES_CACHE_TTL):
+            return [dict(c) for c in _categories_cache_data]
         cats = Category.query.order_by(Category.id).all()
-        return [c.to_dict() for c in cats]
+        data = [c.to_dict() for c in cats]
+        _categories_cache_data = data
+        _categories_cache_ts = now
+        return [dict(c) for c in data]
 
     def add_category(self, name, name_english=''):
         existing = Category.query.filter_by(name=name).first()
@@ -29,6 +56,7 @@ class SQLAlchemy(SQLAlchemy):
             new_cat = Category(name=name, name_english=name_english)
             self.session.add(new_cat)
             self.session.commit()
+            _invalidate_categories_cache()
             return new_cat.id
         except Exception:
             self.session.rollback()
@@ -49,21 +77,35 @@ class SQLAlchemy(SQLAlchemy):
         shops = Shop.query.filter_by(category_id=category_id).order_by(Shop.id).all()
         return [s.to_dict() for s in shops]
 
-    def search_shops(self, query):
+    def search_shops(self, query, limit=200):
+        """Score shops matching query; SQL prefilter bounds the work.
+
+        A SQL ``ilike`` prefilter (plus category/semantic ID matches)
+        selects at most ``limit`` candidate rows before the Python
+        ``calculate_score`` pass, so a 10k-shop table never gets fully
+        scored or serialized. Only scored candidates get ``to_dict``.
+        """
         if not query:
             return []
-            
+
         normalized_query = normalize_text(query)
         query_tokens = tokenize(query)
-        
+
         if not normalized_query:
             return []
-            
+
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            limit = 200
+        limit = max(1, min(limit, 1000))
+
         semantic_search = SemanticSearch()
         semantic_results = semantic_search.search(query)
-        
+
         semantic_scores = {r['shop_id']: r['score'] * 100 for r in semantic_results} # Scale up 0-1 to 0-100 logic
-        
+        semantic_ids = [r['shop_id'] for r in semantic_results]
+
         # Phase 3: Category-based search fallback
         # Match query against category names (Bengali + English)
         matching_categories = Category.query.filter(
@@ -73,11 +115,38 @@ class SQLAlchemy(SQLAlchemy):
             )
         ).all()
         category_ids = {c.id for c in matching_categories}
-            
+
+        # SQL prefilter: only rows matching the raw text, a matching
+        # category, or a semantic hit become scoring candidates.
+        like = f'%{query}%'
+        filters = [
+            Shop.name.ilike(like),
+            Shop.products.ilike(like),
+            Shop.proprietor.ilike(like),
+            Shop.address.ilike(like),
+            Shop.mobile.ilike(like),
+        ]
+        if category_ids:
+            filters.append(Shop.category_id.in_(list(category_ids)))
+        if semantic_ids:
+            filters.append(Shop.id.in_(semantic_ids))
+
+        # ID pass first so LIMIT applies to shops, not joined rows.
+        candidate_ids = [
+            row[0] for row in Shop.query.with_entities(Shop.id)
+            .filter(or_(*filters))
+            .order_by(Shop.id)
+            .limit(limit)
+            .all()
+        ]
+        if not candidate_ids:
+            return []
+
         shops = Shop.query.options(
-             joinedload(Shop.shop_tags).joinedload(ShopTag.tag)
-        ).all()
-        
+            joinedload(Shop.category),
+            joinedload(Shop.shop_tags).joinedload(ShopTag.tag)
+        ).filter(Shop.id.in_(candidate_ids)).all()
+
         scored_shops = []
         for shop in shops:
             tags_data = [{'name': st.tag.name, 'name_bn': st.tag.name_bn} for st in shop.shop_tags]
@@ -107,8 +176,8 @@ class SQLAlchemy(SQLAlchemy):
                 scored_shops.append((score, shop))
         
         scored_shops.sort(key=lambda x: x[0], reverse=True)
-        
-        return [item[1].to_dict() for item in scored_shops]
+
+        return [item[1].to_dict() for item in scored_shops[:limit]]
 
     def add_shop(self, data):
         try:
@@ -282,14 +351,15 @@ class SQLAlchemy(SQLAlchemy):
                 self.session.add(new_shop)
 
             self.session.commit()
+            _invalidate_categories_cache()
             return len(data['categories']), len(data['shops'])
         except Exception:
             self.session.rollback()
             raise
 
     # ==================== BUYER HELPERS ====================
-    def get_all_buyers(self):
-        buyers = Buyer.query.order_by(Buyer.company_name).all()
+    def get_all_buyers(self, limit=1000, offset=0):
+        buyers = Buyer.query.order_by(Buyer.company_name).limit(limit).offset(offset).all()
         return [b.to_dict() for b in buyers]
 
     def get_buyer_by_id(self, buyer_id):

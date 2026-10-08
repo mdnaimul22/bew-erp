@@ -12,7 +12,7 @@ from src.schema.sale import SaleItemCreate
 logger = setup_logger(Settings.LOG_DIR / "services.log", name="bew.services.sale")
 
 
-def list_all(query: str = ''):
+def list_all(query: str = '', limit: int = 1000, offset: int = 0):
     """Return all sales records, optionally filtered."""
     if query:
         from src.db.database import Sale, Buyer
@@ -23,10 +23,10 @@ def list_all(query: str = ''):
                 Sale.voucher_id.ilike(f'%{query}%'),
                 Buyer.company_name.ilike(f'%{query}%')
             )
-        ).order_by(Sale.sale_date.desc()).all()
+        ).order_by(Sale.sale_date.desc()).limit(limit).offset(offset).all()
         return [s.to_dict() for s in items]
-        
-    return db.get_all_sales()
+
+    return db.get_all_sales(limit=limit, offset=offset)
 
 
 def get(sale_id: int):

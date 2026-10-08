@@ -66,8 +66,10 @@ db.init_app(app)
 
 @app.before_request
 def log_analytics():
-    # Exclude static files and assets
-    excluded_prefixes = ['/static/', '/shop_img/', '/favicon.ico', '/robots.txt']
+    # Exclude static files and assets. Dashboard/API traffic is
+    # high-volume internal use, not public-page analytics — skip it.
+    excluded_prefixes = ['/static/', '/shop_img/', '/favicon.ico', '/robots.txt',
+                         '/dashboard/', '/api/']
     if any(request.path.startswith(prefix) for prefix in excluded_prefixes):
         return
     

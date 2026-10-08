@@ -7,7 +7,7 @@ from src.helpers.auth import verify_delete_password
 logger = setup_logger(Settings.LOG_DIR / "services.log", name="bew.services.buyer")
 
 
-def list_all(query: str = ''):
+def list_all(query: str = '', limit: int = 1000, offset: int = 0):
     """List all buyers, optionally filtered by search query."""
     if query:
         from sqlalchemy import or_
@@ -17,11 +17,11 @@ def list_all(query: str = ''):
                 Buyer.company_name.ilike(f'%{query}%'),
                 Buyer.contacts.any(BuyerContact.name.ilike(f'%{query}%'))
             )
-        ).order_by(Buyer.company_name).all()
+        ).order_by(Buyer.company_name).limit(limit).offset(offset).all()
 
         return [b.to_dict() for b in buyers_query]
 
-    return db.get_all_buyers()
+    return db.get_all_buyers(limit=limit, offset=offset)
 
 
 def get(buyer_id: int):

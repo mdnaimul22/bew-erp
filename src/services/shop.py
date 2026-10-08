@@ -31,11 +31,11 @@ def get(shop_id: int):
     return shop
 
 
-def search(query: str):
-    """Search shops by keyword."""
+def search(query: str, limit: int = 200):
+    """Search shops by keyword (SQL-prefiltered, capped at limit rows)."""
     if not query:
         return []
-    return db.search_shops(query)
+    return db.search_shops(query, limit=limit)
 
 
 def get_categories():

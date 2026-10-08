@@ -66,6 +66,20 @@ class TestShopRoutes:
         resp = client.post('/api/tag/add', json={'name': 'unauthorized_tag'})
         assert resp.status_code in (302, 401)
 
+    def test_api_shops_per_page_clamped(self, client):
+        """Unbounded per_page must be clamped to <= 100 (Task 5 perf guard)."""
+        r = client.get("/api/shops?per_page=999999")
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data["per_page"] <= 100
+        assert len(data["shops"]) <= 100
+
+    def test_api_search_bounded(self, client):
+        """Search API must return a bounded result set (SQL prefilter + LIMIT)."""
+        r = client.get("/api/search?q=e")
+        assert r.status_code == 200
+        assert len(r.get_json()) <= 200
+
 
 class TestBuyerRoutes:
     """Verify buyer routes respond."""

@@ -40,7 +40,8 @@ def shop_list():
     per_page = 20
 
     if query:
-        all_shops = shop_service.search(query)
+        # SQL-prefiltered + capped at 200 candidates; paginate the slice.
+        all_shops = shop_service.search(query, limit=200)
         shops, meta = paginate_list(all_shops, page, per_page=per_page)
         total = len(all_shops)
     else:
@@ -159,17 +160,25 @@ def delete_shop(shop_id):
 
 @shops_bp.route('/api/search')
 def api_search():
-    """API endpoint for search"""
+    """API endpoint for search (SQL-prefiltered, capped)."""
     query = request.args.get('q', '')
-    shops = shop_service.search(query) if query else []
+    shops = shop_service.search(query, limit=200) if query else []
     return jsonify(shops)
 
 
 @shops_bp.route('/api/shops')
 def api_shops():
-    """API endpoint for all shops"""
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
+    """API endpoint for all shops (per_page clamped to <= 100)."""
+    try:
+        page = int(request.args.get('page', 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        per_page = int(request.args.get('per_page', 20))
+    except (TypeError, ValueError):
+        per_page = 20
+    page = max(1, page)
+    per_page = max(1, min(per_page, 100))
     offset = (page - 1) * per_page
 
     shops, total = shop_service.list_all(limit=per_page, offset=offset)
