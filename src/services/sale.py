@@ -44,11 +44,16 @@ def get_inventory():
     return db.get_all_inventory()
 
 
-def create(form_data, files=None):
+def create(form_data, files=None, client_key=None):
     """Create a new sale record.
 
+    Args:
+        client_key: optional ``Idempotency-Key`` header value — a repeat
+            submission with the same key returns the original sale ID
+            instead of creating a duplicate row.
+
     Returns:
-        The new sale ID.
+        The new (or already-created) sale ID.
     """
     voucher_filename = None
     if files and 'voucher_image' in files:
@@ -64,6 +69,8 @@ def create(form_data, files=None):
         'voucher_image': voucher_filename,
         'items': items,
     }
+    if client_key:
+        sale_data['client_key'] = client_key
 
     sale_id = db.add_sale(sale_data)
     logger.info(f"Created sale #{sale_id}")

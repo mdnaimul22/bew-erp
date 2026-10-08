@@ -4,7 +4,8 @@ import uuid
 import json
 from flask import url_for
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import or_
+from sqlalchemy import or_, CheckConstraint, UniqueConstraint
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 from src.config import Settings, setup_logger, read_json, exists
 
@@ -418,6 +419,21 @@ class SQLAlchemy(SQLAlchemy):
         return data
 
     def add_buyer(self, data):
+        """Insert a buyer atomically; display-id collisions from
+        multi-machine sequence overlap retry with a re-synced sequence."""
+        last_exc = None
+        for _ in range(_DISPLAY_ID_RETRY_ATTEMPTS):
+            try:
+                return self._insert_buyer(data)
+            except IntegrityError as e:
+                db.session.rollback()
+                if not _is_display_id_collision(e):
+                    raise
+                last_exc = e
+                _resync_id_sequence(ID_PREFIX_BUYER, Buyer)
+        raise last_exc
+
+    def _insert_buyer(self, data):
         try:
             buyer = Buyer(
                 display_id=generate_id(ID_PREFIX_BUYER),
@@ -554,6 +570,36 @@ class SQLAlchemy(SQLAlchemy):
         return data
 
     def add_sale(self, data):
+        """Insert a sale header + lines atomically (lookup-or-create when
+        ``data['client_key']`` is present: a repeated request with the same
+        idempotency key returns the original row instead of duplicating).
+        Display-id collisions from multi-machine sequence overlap are
+        retried with a re-synced sequence (see _resync_id_sequence)."""
+        client_key = data.get('client_key')
+        if client_key:
+            existing = Sale.query.filter_by(client_key=client_key).first()
+            if existing is not None:
+                return existing.id
+        last_exc = None
+        for _ in range(_DISPLAY_ID_RETRY_ATTEMPTS):
+            try:
+                return self._insert_sale(data)
+            except IntegrityError as e:
+                db.session.rollback()
+                msg = str(getattr(e, 'orig', e) or e)
+                if client_key and 'client_key' in msg:
+                    # Lost a same-key race: the winner is now visible.
+                    winner = Sale.query.filter_by(
+                        client_key=client_key).first()
+                    if winner is not None:
+                        return winner.id
+                if not _is_display_id_collision(e):
+                    raise
+                last_exc = e
+                _resync_id_sequence(ID_PREFIX_SALE, Sale)
+        raise last_exc
+
+    def _insert_sale(self, data):
         try:
             new_sale = Sale(
                 display_id=generate_id(ID_PREFIX_SALE),
@@ -561,6 +607,7 @@ class SQLAlchemy(SQLAlchemy):
                 buyer_id=data.get('buyer_id'),
                 sale_date=data.get('sale_date') or datetime.date.today(),
                 voucher_image=data.get('voucher_image'),
+                client_key=data.get('client_key'),
                 total_amount=0
             )
             self.session.add(new_sale)
@@ -659,6 +706,33 @@ class SQLAlchemy(SQLAlchemy):
         return purchase.to_dict(include_items=True) if purchase else None
 
     def add_supplier_purchase(self, data):
+        """Insert a purchase voucher atomically (lookup-or-create on
+        ``data['client_key']``; display-id collision retry — see add_sale)."""
+        client_key = data.get('client_key')
+        if client_key:
+            existing = SupplierPurchase.query.filter_by(
+                client_key=client_key).first()
+            if existing is not None:
+                return existing.id
+        last_exc = None
+        for _ in range(_DISPLAY_ID_RETRY_ATTEMPTS):
+            try:
+                return self._insert_supplier_purchase(data)
+            except IntegrityError as e:
+                db.session.rollback()
+                msg = str(getattr(e, 'orig', e) or e)
+                if client_key and 'client_key' in msg:
+                    winner = SupplierPurchase.query.filter_by(
+                        client_key=client_key).first()
+                    if winner is not None:
+                        return winner.id
+                if not _is_display_id_collision(e):
+                    raise
+                last_exc = e
+                _resync_id_sequence(ID_PREFIX_PURCHASE, SupplierPurchase)
+        raise last_exc
+
+    def _insert_supplier_purchase(self, data):
         try:
             display_id = generate_id(ID_PREFIX_PURCHASE)
             voucher_no = data.get('voucher_no') or ''
@@ -675,6 +749,7 @@ class SQLAlchemy(SQLAlchemy):
                 purchase_date=data.get('purchase_date') or datetime.date.today(),
                 voucher_no=voucher_no,
                 voucher_file_path=voucher_file_path,
+                client_key=data.get('client_key'),
                 work_order_id=data.get('work_order_id'),
                 payment_status=data.get('payment_status') or 'pending',
                 paid_amount=safe_float(data.get('paid_amount'), field='paid_amount'),
@@ -789,6 +864,21 @@ class SQLAlchemy(SQLAlchemy):
         return work_order.to_dict(include_parts=True) if work_order else None
 
     def add_work_order(self, data):
+        """Insert a work order atomically; display-id collisions from
+        multi-machine sequence overlap retry with a re-synced sequence."""
+        last_exc = None
+        for _ in range(_DISPLAY_ID_RETRY_ATTEMPTS):
+            try:
+                return self._insert_work_order(data)
+            except IntegrityError as e:
+                db.session.rollback()
+                if not _is_display_id_collision(e):
+                    raise
+                last_exc = e
+                _resync_id_sequence(ID_PREFIX_WORK_ORDER, WorkOrder)
+        raise last_exc
+
+    def _insert_work_order(self, data):
         try:
             wo_id = generate_id(ID_PREFIX_WORK_ORDER)
             quoted = safe_float(data.get('quoted_price'), field='quoted_price')
@@ -1225,16 +1315,27 @@ class IDSequence(db.Model):
     next_number = db.Column(db.Integer, default=1)
 
 def generate_id(prefix):
-    """Thread-safe ID generation"""
-    seq = IDSequence.query.filter_by(prefix=prefix).first()
-    if not seq:
-        seq = IDSequence(prefix=prefix, next_number=1)
-        db.session.add(seq)
-        db.session.flush()
-    current = seq.next_number
-    seq.next_number += 1
-    db.session.flush()
-    return f"{prefix}{current}"
+    """Thread-safe ID generation with retry on sequence-row races.
+
+    Two machines sharing one DB file (GitHub-as-transfer) can race when
+    both create the same ``IDSequence`` row at once; the loser rolls back
+    and re-reads instead of blowing up. The last-resort uuid suffix keeps
+    the return value unique even under pathological contention.
+    """
+    for _ in range(3):
+        try:
+            seq = IDSequence.query.filter_by(prefix=prefix).first()
+            if not seq:
+                seq = IDSequence(prefix=prefix, next_number=1)
+                db.session.add(seq)
+                db.session.flush()
+            current = seq.next_number
+            seq.next_number += 1
+            db.session.flush()
+            return f"{prefix}{current}"
+        except IntegrityError:
+            db.session.rollback()
+    return f"{prefix}{uuid.uuid4().hex[:8].upper()}"
 
 # ID Prefix Constants
 ID_PREFIX_BUYER = 'BEW-B-'
@@ -1245,6 +1346,173 @@ ID_PREFIX_RAW_MATERIAL = 'BEW-ITEM-'
 ID_PREFIX_VOUCHER_PURCHASE = 'BEW-VCH-P-'
 ID_PREFIX_VOUCHER_SALE = 'BEW-VCH-S-'
 ID_PREFIX_VOUCHER_WORK_ORDER = 'BEW-VCH-W-'
+
+# How many times a display_id write retries after a UNIQUE collision
+# before giving up. Each retry re-syncs the sequence past taken numbers,
+# so sequence collisions converge instead of looping on one value.
+_DISPLAY_ID_RETRY_ATTEMPTS = 3
+
+
+def _is_display_id_collision(exc):
+    """True when an IntegrityError is a display_id UNIQUE collision
+    (as opposed to any other constraint failure, which must re-raise)."""
+    msg = str(getattr(exc, 'orig', exc) or exc)
+    return 'display_id' in msg
+
+
+def _resync_id_sequence(prefix, model):
+    """Advance ``id_sequences`` past the highest taken display number.
+
+    After a rollback the sequence counter rolls back too, so a naive
+    retry would regenerate the same colliding value forever. Jumping to
+    max(taken)+1 converges in a single step when two machines share one
+    DB file and pick overlapping sequence numbers.
+    """
+    try:
+        rows = db.session.query(model.display_id).filter(
+            model.display_id.like(f'{prefix}%')).all()
+        nums = []
+        for (did,) in rows:
+            if did and did.startswith(prefix):
+                try:
+                    nums.append(int(did[len(prefix):]))
+                except ValueError:
+                    continue  # uuid-suffixed fallback ids carry no number
+        seq = IDSequence.query.filter_by(prefix=prefix).first()
+        if seq is None:
+            seq = IDSequence(prefix=prefix, next_number=1)
+            db.session.add(seq)
+        target = max(nums, default=0) + 1
+        if seq.next_number is None or seq.next_number < target:
+            seq.next_number = target
+        db.session.flush()
+    except Exception as e:
+        logger.warning(f"Could not re-sync id sequence {prefix!r}: {e}")
+
+
+def _existing_unique_cover(table, cols):
+    """True when some UNIQUE index already covers exactly ``cols``."""
+    try:
+        wanted = set(cols)
+        for row in db.session.execute(
+                db.text(f'PRAGMA index_list("{table}")')).fetchall():
+            # row: (seq, name, unique, origin, partial)
+            if not row[2]:
+                continue
+            covered = {r[2] for r in db.session.execute(
+                db.text(f'PRAGMA index_info("{row[1]}")')).fetchall()}
+            if covered == wanted:
+                return True
+    except Exception as e:
+        logger.warning(f"Could not inspect indexes on {table}: {e}")
+    return False
+
+
+def _index_covers_column(table, col):
+    """True when any index already covers ``col`` (unique or not)."""
+    try:
+        for row in db.session.execute(
+                db.text(f'PRAGMA index_list("{table}")')).fetchall():
+            covered = {r[2] for r in db.session.execute(
+                db.text(f'PRAGMA index_info("{row[1]}")')).fetchall()}
+            if col in covered:
+                return True
+    except Exception as e:
+        logger.warning(f"Could not inspect indexes on {table}: {e}")
+    return False
+
+
+def _table_has_column(table, col):
+    try:
+        return any(r[1] == col for r in db.session.execute(
+            db.text(f'PRAGMA table_info("{table}")')).fetchall())
+    except Exception as e:
+        logger.warning(f"Could not inspect columns on {table}: {e}")
+        return True  # assume present rather than double-ALTER
+
+
+def _has_duplicates(table, cols):
+    """True when legacy rows already violate the intended UNIQUE guard."""
+    grouping = ', '.join(f'"{c}"' for c in cols)
+    where = ' AND '.join(f'"{c}" IS NOT NULL' for c in cols)
+    try:
+        row = db.session.execute(db.text(
+            f'SELECT COUNT(*) FROM (SELECT {grouping} FROM "{table}" '
+            f'WHERE {where} GROUP BY {grouping} HAVING COUNT(*) > 1)'
+        )).fetchone()
+        return bool(row and row[0])
+    except Exception as e:
+        logger.warning(f"Could not check duplicates on {table}: {e}")
+        return True  # fail closed: do not build the index
+
+
+def ensure_merge_safe_columns():
+    """Additively backfill merge-safe identity guards on legacy DB files.
+
+    ``db.create_all()`` never adds columns to existing tables, so this
+    runs right after it at startup (see main.py): ``ALTER TABLE ... ADD
+    COLUMN`` for ``client_key`` plus ``CREATE UNIQUE INDEX`` guards for
+    ``client_key``/``display_id`` and plain indexes for hot FK columns.
+    No table is ever rewritten; CHECK constraints stay fresh-DB-only
+    (SQLite cannot add a CHECK to an existing table). Every step is
+    idempotent and a skipped guard only logs a warning — startup never
+    fails because of this function.
+    """
+    try:
+        for table, col, coltype in (
+                ('sales', 'client_key', 'VARCHAR(64)'),
+                ('supplier_purchases', 'client_key', 'VARCHAR(64)')):
+            if not _table_has_column(table, col):
+                db.session.execute(db.text(
+                    f'ALTER TABLE "{table}" ADD COLUMN "{col}" {coltype}'))
+                logger.info(f"Backfilled {table}.{col}")
+
+        for table, name, cols in (
+                ('sales', 'uq_sales_client_key', ['client_key']),
+                ('supplier_purchases', 'uq_supplier_purchases_client_key',
+                 ['client_key']),
+                ('sales', 'uq_sales_display_id', ['display_id']),
+                ('supplier_purchases', 'uq_supplier_purchases_display_id',
+                 ['display_id']),
+                ('buyers', 'uq_buyers_display_id', ['display_id']),
+                ('work_orders', 'uq_work_orders_display_id',
+                 ['display_id']),
+                ('stock_movements', 'uq_stock_movement_source',
+                 ['raw_material_id', 'source_type', 'source_id'])):
+            if _existing_unique_cover(table, cols):
+                continue
+            if _has_duplicates(table, cols):
+                logger.warning(
+                    f"Skipped UNIQUE guard {name} on {table}: legacy "
+                    f"duplicate values exist (dedupe first, see "
+                    f"docs/transfer-protocol.md)")
+                continue
+            cols_sql = ', '.join(f'"{c}"' for c in cols)
+            db.session.execute(db.text(
+                f'CREATE UNIQUE INDEX IF NOT EXISTS "{name}" '
+                f'ON "{table}" ({cols_sql})'))
+            logger.info(f"Created UNIQUE guard {name} on {table}")
+
+        for table, name, col in (
+                ('buyer_contacts', 'ix_buyer_contacts_buyer_id',
+                 'buyer_id'),
+                ('sales', 'ix_sales_buyer_id', 'buyer_id'),
+                ('sale_items', 'ix_sale_items_sale_id', 'sale_id'),
+                ('inventory_items', 'ix_inventory_items_shop_id',
+                 'shop_id'),
+                ('stock_movements', 'ix_stock_movements_supplier_id',
+                 'supplier_id')):
+            if _index_covers_column(table, col):
+                continue
+            db.session.execute(db.text(
+                f'CREATE INDEX IF NOT EXISTS "{name}" '
+                f'ON "{table}" ("{col}")'))
+            logger.info(f"Created index {name} on {table}")
+
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.warning(f"ensure_merge_safe_columns skipped guards: {e}")
 
 # ==================== RAW MATERIAL CATEGORY ====================
 class RawMaterialCategory(db.Model):
@@ -1322,19 +1590,27 @@ class StockMovement(db.Model):
     movement_type = db.Column(db.String(10), nullable=False)  # 'IN', 'OUT', 'ADJUST'
     quantity = db.Column(db.Float, nullable=False)
     unit = db.Column(db.String(50))
-    
+
     # Source tracking
     source_type = db.Column(db.String(50))  # 'purchase', 'sale', 'work_order', 'adjustment'
     source_id = db.Column(db.String(50))    # Reference to source record (display_id)
-    
+
     # For purchases: track supplier and rate
-    supplier_id = db.Column(db.Integer, db.ForeignKey('shops.id'), nullable=True)
+    supplier_id = db.Column(db.Integer, db.ForeignKey('shops.id'), nullable=True, index=True)
     rate_per_unit = db.Column(db.Float, default=0)
     total_amount = db.Column(db.Float, default=0)
-    
+
     notes = db.Column(db.Text)
     movement_date = db.Column(db.Date, default=datetime.date.today)
     created_at = db.Column(db.DateTime, default=datetime.datetime.now)
+
+    __table_args__ = (
+        CheckConstraint("movement_type IN ('IN', 'OUT', 'ADJUST')",
+                        name='ck_stock_movement_type'),
+        CheckConstraint('quantity > 0', name='ck_stock_movement_qty'),
+        UniqueConstraint('raw_material_id', 'source_type', 'source_id',
+                         name='uq_stock_movement_source'),
+    )
 
     # Relationships
     supplier = db.relationship('Shop')
@@ -1497,7 +1773,7 @@ class Buyer(db.Model):
 class BuyerContact(db.Model):
     __tablename__ = 'buyer_contacts'
     id = db.Column(db.Integer, primary_key=True)
-    buyer_id = db.Column(db.Integer, db.ForeignKey('buyers.id'), nullable=False)
+    buyer_id = db.Column(db.Integer, db.ForeignKey('buyers.id'), nullable=False, index=True)
     name = db.Column(db.String(500))
     designation = db.Column(db.String(500))
     mobile = db.Column(db.Text)  # JSON-encoded list of mobiles
@@ -1531,7 +1807,7 @@ class BuyerContact(db.Model):
 class InventoryItem(db.Model):
     __tablename__ = 'inventory_items'
     id = db.Column(db.Integer, primary_key=True)
-    shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'), nullable=False)
+    shop_id = db.Column(db.Integer, db.ForeignKey('shops.id'), nullable=False, index=True)
     material_name = db.Column(db.String(1000), nullable=False)
     purchase_date = db.Column(db.Date, default=datetime.date.today)
     quantity = db.Column(db.Float, default=0.0)
@@ -1560,7 +1836,11 @@ class Sale(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     display_id = db.Column(db.String(50), unique=True, index=True)  # BEW-TRX-1
     voucher_id = db.Column(db.String(50))  # BEW-VCH-S-1
-    buyer_id = db.Column(db.Integer, db.ForeignKey('buyers.id'), nullable=False)
+    # Idempotency key for safe retries / multi-machine file transfer.
+    # Backfilled on legacy DB files by ensure_merge_safe_columns()
+    # (ALTER TABLE ADD COLUMN + UNIQUE index — no table rewrite).
+    client_key = db.Column(db.String(64), unique=True, index=True)
+    buyer_id = db.Column(db.Integer, db.ForeignKey('buyers.id'), nullable=False, index=True)
     sale_date = db.Column(db.Date, default=datetime.date.today)
     voucher_image = db.Column(db.String(5000))
     total_amount = db.Column(db.Float, default=0.0)
@@ -1574,6 +1854,7 @@ class Sale(db.Model):
             'id': self.id,
             'display_id': self.display_id,
             'voucher_id': self.voucher_id,
+            'client_key': self.client_key,
             'buyer_id': self.buyer_id,
             'buyer_name': self.buyer.company_name if self.buyer else 'Unknown',
             'sale_date': self.sale_date.isoformat() if self.sale_date else None,
@@ -1586,7 +1867,7 @@ class Sale(db.Model):
 class SaleItem(db.Model):
     __tablename__ = 'sale_items'
     id = db.Column(db.Integer, primary_key=True)
-    sale_id = db.Column(db.Integer, db.ForeignKey('sales.id'), nullable=False)
+    sale_id = db.Column(db.Integer, db.ForeignKey('sales.id'), nullable=False, index=True)
     raw_material_id = db.Column(db.Integer, db.ForeignKey('raw_materials.id'), nullable=True)  # Link to master
     product_name = db.Column(db.String(1000))  # Kept for backward compatibility
     quantity = db.Column(db.Float, default=0.0)
@@ -1598,6 +1879,10 @@ class SaleItem(db.Model):
     inventory_link_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id'), nullable=True)
     inventory_item = db.relationship('InventoryItem')
     raw_material = db.relationship('RawMaterial')
+
+    __table_args__ = (
+        CheckConstraint('quantity > 0', name='ck_sale_item_qty'),
+    )
 
     def to_dict(self):
         return {
@@ -1619,6 +1904,8 @@ class SupplierPurchase(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     display_id = db.Column(db.String(50), unique=True, index=True)  # BEW-BUY-1
     voucher_id = db.Column(db.String(50))  # BEW-VCH-P-1
+    # Idempotency key — see Sale.client_key.
+    client_key = db.Column(db.String(64), unique=True, index=True)
     supplier_id = db.Column(db.Integer, db.ForeignKey('shops.id'), nullable=False, index=True)
     purchase_date = db.Column(db.Date, default=datetime.date.today, nullable=False)
     work_order_id = db.Column(db.String(36), db.ForeignKey('work_orders.id'), nullable=True, index=True)
@@ -1633,11 +1920,18 @@ class SupplierPurchase(db.Model):
     supplier = db.relationship('Shop')
     items = db.relationship('SupplierPurchaseItem', backref='purchase', lazy=True, cascade='all, delete-orphan')
 
+    __table_args__ = (
+        CheckConstraint(
+            "payment_status IN ('pending', 'paid', 'partial', 'cancelled')",
+            name='ck_supplier_purchase_pay_status'),
+    )
+
     def to_dict(self, include_items=False):
         data = {
             'id': self.id,
             'display_id': self.display_id,
             'voucher_id': self.voucher_id,
+            'client_key': self.client_key,
             'supplier_id': self.supplier_id,
             'supplier_name': self.supplier.name if self.supplier else 'Unknown',
             'purchase_date': self.purchase_date.isoformat() if self.purchase_date else None,
@@ -1679,6 +1973,10 @@ class SupplierPurchaseItem(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.datetime.now)
 
     raw_material = db.relationship('RawMaterial')
+
+    __table_args__ = (
+        CheckConstraint('quantity > 0', name='ck_supplier_purchase_item_qty'),
+    )
 
     def to_dict(self):
         return {
@@ -1722,6 +2020,12 @@ class WorkOrder(db.Model):
     company = db.relationship('Buyer')
     parts = db.relationship('WorkOrderPart', backref='work_order', lazy=True, cascade='all, delete-orphan')
     documents = db.relationship('WorkOrderDocument', backref='work_order', lazy=True, cascade='all, delete-orphan')
+
+    __table_args__ = (
+        CheckConstraint(
+            "payment_status IN ('pending', 'paid', 'partial', 'cancelled')",
+            name='ck_work_order_pay_status'),
+    )
 
     def to_dict(self, include_parts=False):
         data = {
@@ -1829,6 +2133,10 @@ class WorkOrderPart(db.Model):
 
     supplier = db.relationship('Shop')
     raw_material = db.relationship('RawMaterial')
+
+    __table_args__ = (
+        CheckConstraint('qty > 0', name='ck_work_order_part_qty'),
+    )
 
     def to_dict(self):
         return {

@@ -36,7 +36,9 @@ def new_sale():
 
     if request.method == 'POST':
         try:
-            sale_id = sale_service.create(request.form, request.files)
+            sale_id = sale_service.create(
+                request.form, request.files,
+                client_key=request.headers.get('Idempotency-Key'))
             flash(_('Sale created successfully!'), 'success')
             return redirect(url_for('sales.sale_detail', sale_id=sale_id))
         except ValidationError as e:

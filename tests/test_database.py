@@ -448,3 +448,274 @@ class TestWorkOrderNonDestructiveUpdate:
             assert wo['total_cost'] == 100.0
         finally:
             self._cleanup(db, wo_id, buyer_id)
+
+
+class TestMergeSafeIdentity:
+    """Task 6 TDD (RED first): merge-safe identity + additive constraint
+    guards. Uses the live test DB via app_context (repo convention) and
+    cleans up every row it creates in a finally block.
+
+    Pre-flight ruling outcome: Sale/Buyer PKs stay Integer (changing PK
+    type needs a table rebuild — rejected). Merge-safe identity rests on
+    unique display_id + client_key idempotency.
+    """
+
+    def _make_buyer(self, db, tag):
+        import uuid as _uuid
+        return db.add_buyer({
+            'company_name': f'T6 Buyer {tag} {_uuid.uuid4().hex[:6]}',
+            'address': 'Dhaka',
+            'contacts': [],
+        })
+
+    def _cleanup_sale(self, db, sale_id, buyer_id):
+        from src.db.database import Sale, SaleItem, Buyer
+        try:
+            db.session.rollback()
+            SaleItem.query.filter_by(sale_id=sale_id).delete()
+            sale = Sale.query.get(sale_id)
+            if sale is not None:
+                db.session.delete(sale)
+            buyer = Buyer.query.get(buyer_id)
+            if buyer is not None:
+                db.session.delete(buyer)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    def _cleanup_purchase(self, db, purchase_id):
+        from src.db.database import SupplierPurchase, SupplierPurchaseItem
+        try:
+            db.session.rollback()
+            SupplierPurchaseItem.query.filter_by(
+                purchase_id=purchase_id).delete()
+            purchase = SupplierPurchase.query.get(purchase_id)
+            if purchase is not None:
+                db.session.delete(purchase)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    def test_client_key_columns_exist(self, app_context):
+        """Sale/SupplierPurchase expose client_key, incl. on legacy DBs."""
+        from src.db.database import (
+            db, Sale, SupplierPurchase, ensure_merge_safe_columns)
+        ensure_merge_safe_columns()
+        assert hasattr(Sale, 'client_key')
+        assert hasattr(SupplierPurchase, 'client_key')
+        cols = [r[1] for r in db.session.execute(
+            db.text("PRAGMA table_info(sales)")).fetchall()]
+        assert 'client_key' in cols
+        cols = [r[1] for r in db.session.execute(
+            db.text("PRAGMA table_info(supplier_purchases)")).fetchall()]
+        assert 'client_key' in cols
+
+    def test_duplicate_client_key_rejected_at_db(self, app_context):
+        """The UNIQUE guard on client_key must reject a raw double-insert."""
+        import uuid as _uuid
+        import pytest
+        from sqlalchemy.exc import IntegrityError
+        from src.db.database import db, Sale, generate_id, ID_PREFIX_SALE
+        buyer_id = self._make_buyer(db, 'uniq')
+        key = f't6-uniq-{_uuid.uuid4().hex[:8]}'
+        try:
+            db.session.add(Sale(
+                display_id=generate_id(ID_PREFIX_SALE),
+                buyer_id=buyer_id, client_key=key))
+            db.session.flush()
+            db.session.add(Sale(
+                display_id=generate_id(ID_PREFIX_SALE),
+                buyer_id=buyer_id, client_key=key))
+            with pytest.raises(IntegrityError):
+                db.session.flush()
+        finally:
+            db.session.rollback()
+            for row in Sale.query.filter_by(client_key=key).all():
+                db.session.delete(row)
+            db.session.commit()
+            from src.db.database import Buyer
+            buyer = Buyer.query.get(buyer_id)
+            if buyer is not None:
+                db.session.delete(buyer)
+                db.session.commit()
+
+    def test_add_sale_idempotent_same_client_key(self, app_context):
+        """Lookup-or-create: same client_key returns the same row, once."""
+        import uuid as _uuid
+        from src.db.database import db, Sale
+        buyer_id = self._make_buyer(db, 'idem')
+        key = f't6-sale-{_uuid.uuid4().hex[:8]}'
+        payload = {
+            'buyer_id': buyer_id,
+            'client_key': key,
+            'items': [{'product_name': 'Rod', 'quantity': 2,
+                       'unit_price': 100}],
+        }
+        sale_id = db.add_sale(dict(payload))
+        try:
+            again_id = db.add_sale(dict(payload))
+            assert again_id == sale_id
+            assert Sale.query.filter_by(client_key=key).count() == 1
+        finally:
+            from src.db.database import SaleItem
+            db.session.rollback()
+            for row in Sale.query.filter_by(client_key=key).all():
+                SaleItem.query.filter_by(sale_id=row.id).delete()
+                db.session.delete(row)
+            db.session.commit()
+            from src.db.database import Buyer
+            buyer = Buyer.query.get(buyer_id)
+            if buyer is not None:
+                db.session.delete(buyer)
+                db.session.commit()
+
+    def test_add_purchase_idempotent_same_client_key(self, app_context):
+        """Same lookup-or-create contract for supplier purchases."""
+        import uuid as _uuid
+        from src.db.database import db, SupplierPurchase
+        shops = db.get_all_shops(limit=1)
+        supplier_id = shops[0]['id'] if shops else db.add_shop(
+            {'name': 'T6 Supplier'})
+        key = f't6-pur-{_uuid.uuid4().hex[:8]}'
+        payload = {
+            'supplier_id': supplier_id,
+            'client_key': key,
+            'items': [{'product_name': 'Steel', 'quantity': 1,
+                       'rate_per_unit': 50}],
+        }
+        purchase_id = db.add_supplier_purchase(dict(payload))
+        try:
+            again_id = db.add_supplier_purchase(dict(payload))
+            assert again_id == purchase_id
+            assert SupplierPurchase.query.filter_by(
+                client_key=key).count() == 1
+        finally:
+            from src.db.database import SupplierPurchaseItem
+            db.session.rollback()
+            for row in SupplierPurchase.query.filter_by(
+                    client_key=key).all():
+                SupplierPurchaseItem.query.filter_by(
+                    purchase_id=row.id).delete()
+                db.session.delete(row)
+            db.session.commit()
+
+    def test_display_id_collision_retries(self, app_context):
+        """A rewound id_sequences row (two machines, same DB file) must
+        not blow up: the write retries with a fresh display_id."""
+        from src.db.database import (
+            db, Sale, IDSequence, ID_PREFIX_SALE)
+        buyer_id = self._make_buyer(db, 'collide')
+        seq = IDSequence.query.filter_by(prefix=ID_PREFIX_SALE).first()
+        saved = seq.next_number if seq else None
+        sale_id = None
+        try:
+            sale_id = db.add_sale({
+                'buyer_id': buyer_id,
+                'items': [{'product_name': 'Rod', 'quantity': 1,
+                           'unit_price': 10}],
+            })
+            # Rewind the sequence so the next generate_id collides.
+            seq = IDSequence.query.filter_by(prefix=ID_PREFIX_SALE).first()
+            seq.next_number -= 1
+            db.session.commit()
+            sale_id2 = db.add_sale({
+                'buyer_id': buyer_id,
+                'items': [{'product_name': 'Pipe', 'quantity': 1,
+                           'unit_price': 20}],
+            })
+            assert sale_id2 != sale_id
+            assert (Sale.query.get(sale_id).display_id
+                    != Sale.query.get(sale_id2).display_id)
+            from src.db.database import SaleItem
+            SaleItem.query.filter_by(sale_id=sale_id2).delete()
+            sale2 = Sale.query.get(sale_id2)
+            db.session.delete(sale2)
+            db.session.commit()
+        finally:
+            if saved is not None:
+                db.session.rollback()
+                seq = IDSequence.query.filter_by(
+                    prefix=ID_PREFIX_SALE).first()
+                if seq is not None and seq.next_number < saved:
+                    seq.next_number = saved
+                    db.session.commit()
+            if sale_id is not None:
+                self._cleanup_sale(db, sale_id, buyer_id)
+
+    def test_generate_id_distinct(self, app_context):
+        """Successive generate_id calls must never repeat."""
+        from src.db.database import generate_id
+        id1 = generate_id("BEW-S-")
+        id2 = generate_id("BEW-S-")
+        assert id1 != id2
+
+    def test_constraint_guards_in_metadata(self, app_context):
+        """Additive guards exist on fresh-DB metadata (no table rewrite)."""
+        from src.db.database import (
+            Sale, SaleItem, BuyerContact, InventoryItem, StockMovement,
+            SupplierPurchase, WorkOrder, SupplierPurchaseItem, WorkOrderPart)
+        for model, col in [(BuyerContact, 'buyer_id'), (Sale, 'buyer_id'),
+                           (SaleItem, 'sale_id'),
+                           (InventoryItem, 'shop_id'),
+                           (StockMovement, 'supplier_id')]:
+            assert model.__table__.c[col].index, (model, col)
+        assert Sale.__table__.c['display_id'].unique
+        assert SupplierPurchase.__table__.c['display_id'].unique
+        checks = ' '.join(str(c.sqltext)
+                           for c in SaleItem.__table__.constraints
+                           if type(c).__name__ == 'CheckConstraint')
+        assert 'quantity' in checks
+        checks = ' '.join(str(c.sqltext)
+                           for c in StockMovement.__table__.constraints
+                           if type(c).__name__ == 'CheckConstraint')
+        assert 'movement_type' in checks
+        uq = [c for c in StockMovement.__table__.constraints
+              if type(c).__name__ == 'UniqueConstraint'
+              and set(c.columns.keys()) == {'raw_material_id',
+                                            'source_type', 'source_id'}]
+        assert uq, 'StockMovement source-triple unique constraint missing'
+        for model in (SupplierPurchase, WorkOrder):
+            checks = ' '.join(
+                str(c.sqltext) for c in model.__table__.constraints
+                if type(c).__name__ == 'CheckConstraint')
+            assert 'payment_status' in checks, model
+        for model, col in [(SupplierPurchaseItem, 'quantity'),
+                           (WorkOrderPart, 'qty')]:
+            checks = ' '.join(
+                str(c.sqltext) for c in model.__table__.constraints
+                if type(c).__name__ == 'CheckConstraint')
+            assert col in checks, model
+
+    def test_sale_create_route_idempotent(self, auth_client, app_context):
+        """POST /dashboard/sales/new twice with one Idempotency-Key ->
+        same sale (same redirect target), no duplicate row."""
+        import uuid as _uuid
+        import re
+        from src.db.database import db, Sale
+        buyer_id = self._make_buyer(db, 'route')
+        key = f't6-route-{_uuid.uuid4().hex[:8]}'
+        form = {'buyer_id': str(buyer_id), 'product_name': 'T6 Rod',
+                'quantity': '2', 'unit_price': '100'}
+        sale_id = None
+        try:
+            r1 = auth_client.post('/dashboard/sales/new', data=form,
+                                  headers={'Idempotency-Key': key})
+            r2 = auth_client.post('/dashboard/sales/new', data=form,
+                                  headers={'Idempotency-Key': key})
+            assert r1.status_code in (301, 302)
+            assert r1.headers['Location'] == r2.headers['Location']
+            m = re.search(r'/sales/(\d+)', r2.headers['Location'])
+            assert m, r2.headers['Location']
+            sale_id = int(m.group(1))
+            assert Sale.query.filter_by(client_key=key).count() == 1
+        finally:
+            from src.db.database import Buyer, SaleItem
+            db.session.rollback()
+            for row in Sale.query.filter_by(buyer_id=buyer_id).all():
+                SaleItem.query.filter_by(sale_id=row.id).delete()
+                db.session.delete(row)
+            db.session.commit()
+            buyer = Buyer.query.get(buyer_id)
+            if buyer is not None:
+                db.session.delete(buyer)
+                db.session.commit()

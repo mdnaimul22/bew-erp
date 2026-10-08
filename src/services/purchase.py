@@ -50,11 +50,15 @@ def get_shops():
     return db.get_all_shops()
 
 
-def create(form_data, files=None):
+def create(form_data, files=None, client_key=None):
     """Create a new purchase voucher.
 
+    Args:
+        client_key: optional ``Idempotency-Key`` header value — a repeat
+            submission with the same key returns the original purchase ID.
+
     Returns:
-        The new purchase ID.
+        The new (or already-created) purchase ID.
     """
     supplier_id = form_data.get('supplier_id')
     if not supplier_id:
@@ -81,6 +85,8 @@ def create(form_data, files=None):
         'notes': form_data.get('notes'),
         'items': items,
     }
+    if client_key:
+        purchase_data['client_key'] = client_key
 
     purchase_id = db.add_supplier_purchase(purchase_data)
     logger.info(f"Created purchase #{purchase_id}")

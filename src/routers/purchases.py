@@ -50,7 +50,9 @@ def new_purchase():
 
     if request.method == 'POST':
         try:
-            purchase_id = purchase_service.create(request.form, request.files)
+            purchase_id = purchase_service.create(
+                request.form, request.files,
+                client_key=request.headers.get('Idempotency-Key'))
             flash(_('Purchase saved successfully!'), 'success')
             return redirect(url_for('purchases.purchase_detail', purchase_id=purchase_id))
         except ValidationError as e:

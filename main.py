@@ -125,6 +125,11 @@ def ratelimit_handler(e):
 # ── DB setup ─────────────────────────────────────────────────
 with app.app_context():
     db.create_all()
+    # Task 6: backfill merge-safe guards (client_key column, UNIQUE
+    # indexes) on legacy DB files. Additive only — never rewrites a
+    # table, never fails startup.
+    from src.db.database import ensure_merge_safe_columns
+    ensure_merge_safe_columns()
 
 # ── Set language route ───────────────────────────────────────
 @app.route('/set_lang/<lang>')

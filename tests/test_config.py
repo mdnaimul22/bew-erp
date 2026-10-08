@@ -129,3 +129,22 @@ class TestFiles:
         result = get_abs_path('src', 'config')
         assert os.path.isabs(result)
         assert 'src' in result
+
+
+class TestTransferProtocol:
+    """Task 6: docs/transfer-protocol.md pins the GitHub-as-transfer
+    workflow (live DB never synced; .backup artifact + WAL discipline)."""
+
+    def _doc_path(self):
+        return os.path.join(os.path.dirname(__file__), '..', 'docs',
+                            'transfer-protocol.md')
+
+    def test_transfer_protocol_doc_exists(self):
+        assert os.path.isfile(self._doc_path())
+
+    def test_transfer_protocol_covers_backup_discipline(self):
+        with open(self._doc_path(), encoding='utf-8') as f:
+            text = f.read()
+        assert 'sqlite3' in text
+        assert '.backup' in text
+        assert 'Idempotency-Key' in text or 'client_key' in text
