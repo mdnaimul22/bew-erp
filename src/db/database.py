@@ -24,10 +24,14 @@ class SQLAlchemy(SQLAlchemy):
         existing = Category.query.filter_by(name=name).first()
         if existing:
             return existing.id
-        new_cat = Category(name=name, name_english=name_english)
-        self.session.add(new_cat)
-        self.session.commit()
-        return new_cat.id
+        try:
+            new_cat = Category(name=name, name_english=name_english)
+            self.session.add(new_cat)
+            self.session.commit()
+            return new_cat.id
+        except Exception:
+            self.session.rollback()
+            raise
 
     def get_all_shops(self, limit=100000, offset=0):
         shops = Shop.query.order_by(Shop.id).limit(limit).offset(offset).all()
@@ -106,52 +110,64 @@ class SQLAlchemy(SQLAlchemy):
         return [item[1].to_dict() for item in scored_shops]
 
     def add_shop(self, data):
-        new_shop = Shop(
-            category_id=data.get('category_id'),
-            serial_no=data.get('serial_no'),
-            name=data.get('name'),
-            proprietor=data.get('proprietor'),
-            address=data.get('address'),
-            mobile=data.get('mobile'),
-            transaction_status=data.get('transaction_status'),
-            whatsapp=data.get('whatsapp'),
-            email_web=data.get('email_web'),
-            products=data.get('products'),
-            visiting_card=data.get('visiting_card')
-        )
-        self.session.add(new_shop)
-        self.session.commit()
-        return new_shop.id
+        try:
+            new_shop = Shop(
+                category_id=data.get('category_id'),
+                serial_no=data.get('serial_no'),
+                name=data.get('name'),
+                proprietor=data.get('proprietor'),
+                address=data.get('address'),
+                mobile=data.get('mobile'),
+                transaction_status=data.get('transaction_status'),
+                whatsapp=data.get('whatsapp'),
+                email_web=data.get('email_web'),
+                products=data.get('products'),
+                visiting_card=data.get('visiting_card')
+            )
+            self.session.add(new_shop)
+            self.session.commit()
+            return new_shop.id
+        except Exception:
+            self.session.rollback()
+            raise
 
     def update_shop(self, shop_id, data):
         shop = Shop.query.get(shop_id)
         if not shop:
             return False
-        
-        shop.category_id = data.get('category_id')
-        shop.serial_no = data.get('serial_no')
-        shop.name = data.get('name')
-        shop.proprietor = data.get('proprietor')
-        shop.address = data.get('address')
-        shop.mobile = data.get('mobile')
-        shop.transaction_status = data.get('transaction_status')
-        shop.whatsapp = data.get('whatsapp')
-        shop.email_web = data.get('email_web')
-        shop.products = data.get('products')
-        if 'visiting_card' in data:
-            shop.visiting_card = data.get('visiting_card')
-        shop.updated_at = datetime.datetime.now()
-        
-        self.session.commit()
-        return True
+
+        try:
+            shop.category_id = data.get('category_id')
+            shop.serial_no = data.get('serial_no')
+            shop.name = data.get('name')
+            shop.proprietor = data.get('proprietor')
+            shop.address = data.get('address')
+            shop.mobile = data.get('mobile')
+            shop.transaction_status = data.get('transaction_status')
+            shop.whatsapp = data.get('whatsapp')
+            shop.email_web = data.get('email_web')
+            shop.products = data.get('products')
+            if 'visiting_card' in data:
+                shop.visiting_card = data.get('visiting_card')
+            shop.updated_at = datetime.datetime.now()
+
+            self.session.commit()
+            return True
+        except Exception:
+            self.session.rollback()
+            raise
 
     def delete_shop(self, shop_id):
         shop = Shop.query.get(shop_id)
-        if shop:
+        if not shop:
+            return False
+        try:
             self.session.delete(shop)
             self.session.commit()
             return True
-        return False
+        except Exception:
+            self.session.rollback()
+            raise
 
     def get_all_tags(self):
         tags = Tag.query.order_by(Tag.name).all()
@@ -165,19 +181,27 @@ class SQLAlchemy(SQLAlchemy):
         existing = Tag.query.filter_by(name=name).first()
         if existing:
             return existing.id
-        new_tag = Tag(name=name, name_bn=name_bn)
-        self.session.add(new_tag)
-        self.session.commit()
-        return new_tag.id
+        try:
+            new_tag = Tag(name=name, name_bn=name_bn)
+            self.session.add(new_tag)
+            self.session.commit()
+            return new_tag.id
+        except Exception:
+            self.session.rollback()
+            raise
 
     def delete_tag(self, tag_id):
         tag = Tag.query.get(tag_id)
-        if tag:
+        if not tag:
+            return False
+        try:
             ShopTag.query.filter_by(tag_id=tag_id).delete()
             self.session.delete(tag)
             self.session.commit()
             return True
-        return False
+        except Exception:
+            self.session.rollback()
+            raise
 
     def get_shop_tags(self, shop_id):
         shop = Shop.query.get(shop_id)
@@ -189,18 +213,26 @@ class SQLAlchemy(SQLAlchemy):
         existing = ShopTag.query.filter_by(shop_id=shop_id, tag_id=tag_id).first()
         if existing:
             return existing.id
-        new_shop_tag = ShopTag(shop_id=shop_id, tag_id=tag_id)
-        self.session.add(new_shop_tag)
-        self.session.commit()
-        return new_shop_tag.id
+        try:
+            new_shop_tag = ShopTag(shop_id=shop_id, tag_id=tag_id)
+            self.session.add(new_shop_tag)
+            self.session.commit()
+            return new_shop_tag.id
+        except Exception:
+            self.session.rollback()
+            raise
 
     def remove_shop_tag(self, shop_id, tag_id):
         shop_tag = ShopTag.query.filter_by(shop_id=shop_id, tag_id=tag_id).first()
-        if shop_tag:
+        if not shop_tag:
+            return False
+        try:
             self.session.delete(shop_tag)
             self.session.commit()
             return True
-        return False
+        except Exception:
+            self.session.rollback()
+            raise
 
     def search_shops_by_tag(self, tag_name):
         tag = Tag.query.filter(Tag.name.ilike(f'%{tag_name}%')).first()
@@ -213,42 +245,46 @@ class SQLAlchemy(SQLAlchemy):
         json_path = json_path or str(Settings.SHOPS_JSON_PATH)
         data = read_json(json_path)
 
-        Shop.query.delete()
-        Category.query.delete()
-        
         try:
-            self.session.execute(db.text("DELETE FROM sqlite_sequence WHERE name='shops' OR name='categories'"))
-        except Exception as e:
-            logger.warning(f"Failed to reset sqlite_sequence: {e}")
+            Shop.query.delete()
+            Category.query.delete()
 
-        for cat in data['categories']:
-            new_cat = Category(
-                id=cat['id'],
-                name=cat['name'],
-                name_english=cat.get('name_english', '')
-            )
-            self.session.add(new_cat)
-        
-        self.session.flush()
+            try:
+                self.session.execute(db.text("DELETE FROM sqlite_sequence WHERE name='shops' OR name='categories'"))
+            except Exception as e:
+                logger.warning(f"Failed to reset sqlite_sequence: {e}")
 
-        # Insert shops
-        for shop in data['shops']:
-            new_shop = Shop(
-                category_id=shop.get('category_id'),
-                serial_no=shop.get('serial_no', ''),
-                name=shop.get('name', ''),
-                proprietor=shop.get('proprietor', ''),
-                address=shop.get('address', ''),
-                mobile=shop.get('mobile', ''),
-                transaction_status=shop.get('transaction_status', ''),
-                whatsapp=shop.get('whatsapp', ''),
-                email_web=shop.get('email_web', ''),
-                products=shop.get('products', '')
-            )
-            self.session.add(new_shop)
-        
-        self.session.commit()
-        return len(data['categories']), len(data['shops'])
+            for cat in data['categories']:
+                new_cat = Category(
+                    id=cat['id'],
+                    name=cat['name'],
+                    name_english=cat.get('name_english', '')
+                )
+                self.session.add(new_cat)
+
+            self.session.flush()
+
+            # Insert shops
+            for shop in data['shops']:
+                new_shop = Shop(
+                    category_id=shop.get('category_id'),
+                    serial_no=shop.get('serial_no', ''),
+                    name=shop.get('name', ''),
+                    proprietor=shop.get('proprietor', ''),
+                    address=shop.get('address', ''),
+                    mobile=shop.get('mobile', ''),
+                    transaction_status=shop.get('transaction_status', ''),
+                    whatsapp=shop.get('whatsapp', ''),
+                    email_web=shop.get('email_web', ''),
+                    products=shop.get('products', '')
+                )
+                self.session.add(new_shop)
+
+            self.session.commit()
+            return len(data['categories']), len(data['shops'])
+        except Exception:
+            self.session.rollback()
+            raise
 
     # ==================== BUYER HELPERS ====================
     def get_all_buyers(self):
@@ -311,59 +347,64 @@ class SQLAlchemy(SQLAlchemy):
         return data
 
     def add_buyer(self, data):
-        buyer = Buyer(
-            display_id=generate_id(ID_PREFIX_BUYER),
-            company_name=data.get('company_name'),
-            address=data.get('address')
-        )
-        self.session.add(buyer)
-        self.session.flush()
-
-        contacts = data.get('contacts', [])
-        for c in contacts:
-            contact = BuyerContact(
-                buyer_id=buyer.id,
-                name=c.get('name'),
-                designation=c.get('designation'),
-                mobile=json.dumps(c.get('mobiles', [])),
-                whatsapp=c.get('whatsapp'),
-                email=c.get('email'),
-                is_primary=c.get('is_primary', False)
+        try:
+            buyer = Buyer(
+                display_id=generate_id(ID_PREFIX_BUYER),
+                company_name=data.get('company_name'),
+                address=data.get('address')
             )
-            self.session.add(contact)
-        
-        self.session.commit()
-        return buyer.id
+            self.session.add(buyer)
+            self.session.flush()
+
+            contacts = data.get('contacts', [])
+            for c in contacts:
+                contact = BuyerContact(
+                    buyer_id=buyer.id,
+                    name=c.get('name'),
+                    designation=c.get('designation'),
+                    mobile=json.dumps(c.get('mobiles', [])),
+                    whatsapp=c.get('whatsapp'),
+                    email=c.get('email'),
+                    is_primary=c.get('is_primary', False)
+                )
+                self.session.add(contact)
+
+            self.session.commit()
+            return buyer.id
+        except Exception:
+            self.session.rollback()
+            raise
 
     def update_buyer(self, buyer_id, data):
         buyer = Buyer.query.get(buyer_id)
         if not buyer:
             return False
-        
-        buyer.company_name = data.get('company_name')
-        buyer.address = data.get('address')
-        buyer.updated_at = datetime.datetime.now()
 
-        BuyerContact.query.filter_by(buyer_id=buyer_id).delete()
-        
-        contacts = data.get('contacts', [])
-        for c in contacts:
-            contact = BuyerContact(
-                buyer_id=buyer_id,
-                name=c.get('name'),
-                designation=c.get('designation'),
-                mobile=json.dumps(c.get('mobiles', [])),
-                whatsapp=c.get('whatsapp'),
-                email=c.get('email'),
-                is_primary=c.get('is_primary', False)
-            )
-            self.session.add(contact)
-            
-        self.session.commit()
-        return True
+        try:
+            buyer.company_name = data.get('company_name')
+            buyer.address = data.get('address')
+            buyer.updated_at = datetime.datetime.now()
 
-        self.session.commit()
-        return True
+            BuyerContact.query.filter_by(buyer_id=buyer_id).delete()
+
+            contacts = data.get('contacts', [])
+            for c in contacts:
+                contact = BuyerContact(
+                    buyer_id=buyer_id,
+                    name=c.get('name'),
+                    designation=c.get('designation'),
+                    mobile=json.dumps(c.get('mobiles', [])),
+                    whatsapp=c.get('whatsapp'),
+                    email=c.get('email'),
+                    is_primary=c.get('is_primary', False)
+                )
+                self.session.add(contact)
+
+            self.session.commit()
+            return True
+        except Exception:
+            self.session.rollback()
+            raise
 
     def delete_buyer(self, buyer_id):
         buyer = Buyer.query.get(buyer_id)
@@ -391,17 +432,21 @@ class SQLAlchemy(SQLAlchemy):
         return [i.to_dict() for i in inventory]
 
     def add_inventory(self, data):
-        new_item = InventoryItem(
-            shop_id=data.get('shop_id'),
-            material_name=data.get('material_name'),
-            purchase_date=data.get('purchase_date') or datetime.date.today(),
-            quantity=data.get('quantity', 0),
-            cost=data.get('cost', 0),
-            tags=data.get('tags', '')
-        )
-        self.session.add(new_item)
-        self.session.commit()
-        return new_item.id
+        try:
+            new_item = InventoryItem(
+                shop_id=data.get('shop_id'),
+                material_name=data.get('material_name'),
+                purchase_date=data.get('purchase_date') or datetime.date.today(),
+                quantity=data.get('quantity', 0),
+                cost=data.get('cost', 0),
+                tags=data.get('tags', '')
+            )
+            self.session.add(new_item)
+            self.session.commit()
+            return new_item.id
+        except Exception:
+            self.session.rollback()
+            raise
     
     def get_inventory_by_id(self, item_id):
         item = InventoryItem.query.get(item_id)
@@ -411,9 +456,13 @@ class SQLAlchemy(SQLAlchemy):
         item = InventoryItem.query.get(item_id)
         if not item:
             return False
-        self.session.delete(item)
-        self.session.commit()
-        return True
+        try:
+            self.session.delete(item)
+            self.session.commit()
+            return True
+        except Exception:
+            self.session.rollback()
+            raise
 
     # ==================== SALES HELPERS ====================
     def get_all_sales(self, limit=100, offset=0):
@@ -434,79 +483,91 @@ class SQLAlchemy(SQLAlchemy):
         return data
 
     def add_sale(self, data):
-        new_sale = Sale(
-            display_id=generate_id(ID_PREFIX_SALE),
-            voucher_id=generate_id(ID_PREFIX_VOUCHER_SALE),
-            buyer_id=data.get('buyer_id'),
-            sale_date=data.get('sale_date') or datetime.date.today(),
-            voucher_image=data.get('voucher_image'),
-            total_amount=0
-        )
-        self.session.add(new_sale)
-        self.session.flush()
-        
-        total = 0
-        if 'items' in data:
-            for item in data['items']:
-                line_total = float(item.get('quantity', 0)) * float(item.get('unit_price', 0))
-                total += line_total
-                
-                new_item = SaleItem(
-                    sale_id=new_sale.id,
-                    product_name=item.get('product_name'),
-                    quantity=item.get('quantity', 0),
-                    unit_price=item.get('unit_price', 0),
-                    total_price=line_total,
-                    weight=item.get('weight', 0),
-                    inventory_link_id=item.get('inventory_link_id')
-                )
-                self.session.add(new_item)
-        
-        new_sale.total_amount = total
-        self.session.commit()
-        return new_sale.id
+        try:
+            new_sale = Sale(
+                display_id=generate_id(ID_PREFIX_SALE),
+                voucher_id=generate_id(ID_PREFIX_VOUCHER_SALE),
+                buyer_id=data.get('buyer_id'),
+                sale_date=data.get('sale_date') or datetime.date.today(),
+                voucher_image=data.get('voucher_image'),
+                total_amount=0
+            )
+            self.session.add(new_sale)
+            self.session.flush()
+
+            total = 0
+            if 'items' in data:
+                for item in data['items']:
+                    line_total = float(item.get('quantity', 0)) * float(item.get('unit_price', 0))
+                    total += line_total
+
+                    new_item = SaleItem(
+                        sale_id=new_sale.id,
+                        product_name=item.get('product_name'),
+                        quantity=item.get('quantity', 0),
+                        unit_price=item.get('unit_price', 0),
+                        total_price=line_total,
+                        weight=item.get('weight', 0),
+                        inventory_link_id=item.get('inventory_link_id')
+                    )
+                    self.session.add(new_item)
+
+            new_sale.total_amount = total
+            self.session.commit()
+            return new_sale.id
+        except Exception:
+            self.session.rollback()
+            raise
 
     def update_sale(self, sale_id, data):
         sale = Sale.query.get(sale_id)
         if not sale:
             return False
-        
-        sale.buyer_id = data.get('buyer_id')
-        sale.sale_date = data.get('sale_date') or datetime.date.today()
-        if 'voucher_image' in data and data.get('voucher_image'):
-            sale.voucher_image = data.get('voucher_image')
-        
-        SaleItem.query.filter_by(sale_id=sale_id).delete()
-        
-        total = 0
-        if 'items' in data:
-            for item in data['items']:
-                line_total = float(item.get('quantity', 0)) * float(item.get('unit_price', 0))
-                total += line_total
-                
-                new_item = SaleItem(
-                    sale_id=sale.id,
-                    product_name=item.get('product_name'),
-                    quantity=item.get('quantity', 0),
-                    unit_price=item.get('unit_price', 0),
-                    total_price=line_total,
-                    weight=item.get('weight', 0),
-                    inventory_link_id=item.get('inventory_link_id')
-                )
-                self.session.add(new_item)
-        
-        sale.total_amount = total
-        sale.updated_at = datetime.datetime.now()
-        self.session.commit()
-        return True
+
+        try:
+            sale.buyer_id = data.get('buyer_id')
+            sale.sale_date = data.get('sale_date') or datetime.date.today()
+            if 'voucher_image' in data and data.get('voucher_image'):
+                sale.voucher_image = data.get('voucher_image')
+
+            SaleItem.query.filter_by(sale_id=sale_id).delete()
+
+            total = 0
+            if 'items' in data:
+                for item in data['items']:
+                    line_total = float(item.get('quantity', 0)) * float(item.get('unit_price', 0))
+                    total += line_total
+
+                    new_item = SaleItem(
+                        sale_id=sale.id,
+                        product_name=item.get('product_name'),
+                        quantity=item.get('quantity', 0),
+                        unit_price=item.get('unit_price', 0),
+                        total_price=line_total,
+                        weight=item.get('weight', 0),
+                        inventory_link_id=item.get('inventory_link_id')
+                    )
+                    self.session.add(new_item)
+
+            sale.total_amount = total
+            sale.updated_at = datetime.datetime.now()
+            self.session.commit()
+            return True
+        except Exception:
+            self.session.rollback()
+            raise
 
     def delete_sale(self, sale_id):
         sale = Sale.query.get(sale_id)
         if not sale:
             return False
-        self.session.delete(sale)
-        self.session.commit()
-        return True
+        try:
+            self.session.delete(sale)
+            self.session.commit()
+            return True
+        except Exception:
+            self.session.rollback()
+            raise
 
     def get_all_supplier_purchases(self, limit=1000, offset=0):
         purchases = SupplierPurchase.query.order_by(SupplierPurchase.purchase_date.desc()).limit(limit).offset(offset).all()
@@ -521,94 +582,38 @@ class SQLAlchemy(SQLAlchemy):
         return purchase.to_dict(include_items=True) if purchase else None
 
     def add_supplier_purchase(self, data):
-        display_id = generate_id(ID_PREFIX_PURCHASE)
-        voucher_no = data.get('voucher_no') or ''
-        voucher_file_path = data.get('voucher_file_path') or ''
-        
-        # If file is uploaded but no custom voucher_no provided, use display_id
-        if voucher_file_path and not voucher_no:
-            voucher_no = display_id
+        try:
+            display_id = generate_id(ID_PREFIX_PURCHASE)
+            voucher_no = data.get('voucher_no') or ''
+            voucher_file_path = data.get('voucher_file_path') or ''
 
-        purchase = SupplierPurchase(
-            display_id=display_id,
-            voucher_id=generate_id(ID_PREFIX_VOUCHER_PURCHASE),
-            supplier_id=safe_int(data.get('supplier_id'), field='supplier_id'),
-            purchase_date=data.get('purchase_date') or datetime.date.today(),
-            voucher_no=voucher_no,
-            voucher_file_path=voucher_file_path,
-            work_order_id=data.get('work_order_id'),
-            payment_status=data.get('payment_status') or 'pending',
-            paid_amount=float(data.get('paid_amount') or 0),
-            notes=data.get('notes') or ''
-        )
-        self.session.add(purchase)
-        self.session.flush()
+            # If file is uploaded but no custom voucher_no provided, use display_id
+            if voucher_file_path and not voucher_no:
+                voucher_no = display_id
 
-        items = data.get('items') or []
-        for item in items:
-            qty = float(item.get('quantity') or 0)
-            rate = float(item.get('rate_per_unit') or 0)
-            total = float(item.get('total_amount') or (qty * rate))
-            purchase_item = SupplierPurchaseItem(
-                purchase_id=purchase.id,
-                raw_material_id=item.get('raw_material_id'),  # Link to master material
-                product_name=item.get('product_name') or '',
-                specification=item.get('specification') or '',
-                quantity=qty,
-                weight=float(item.get('weight') or 0),
-                unit=item.get('unit') or '',
-                rate_per_unit=rate,
-                total_amount=total
+            purchase = SupplierPurchase(
+                display_id=display_id,
+                voucher_id=generate_id(ID_PREFIX_VOUCHER_PURCHASE),
+                supplier_id=safe_int(data.get('supplier_id'), field='supplier_id'),
+                purchase_date=data.get('purchase_date') or datetime.date.today(),
+                voucher_no=voucher_no,
+                voucher_file_path=voucher_file_path,
+                work_order_id=data.get('work_order_id'),
+                payment_status=data.get('payment_status') or 'pending',
+                paid_amount=float(data.get('paid_amount') or 0),
+                notes=data.get('notes') or ''
             )
-            self.session.add(purchase_item)
+            self.session.add(purchase)
+            self.session.flush()
 
-        self.session.commit()
-        return purchase.id
-
-    def update_supplier_purchase(self, purchase_id, data):
-        purchase = SupplierPurchase.query.get(purchase_id)
-        if not purchase:
-            return False
-
-        if 'supplier_id' in data and data.get('supplier_id') is not None:
-            purchase.supplier_id = int(data.get('supplier_id'))
-
-        if 'purchase_date' in data and data.get('purchase_date') is not None:
-            purchase.purchase_date = data.get('purchase_date')
-
-        if 'voucher_no' in data:
-            purchase.voucher_no = data.get('voucher_no') or ''
-
-        if 'voucher_file_path' in data:
-            purchase.voucher_file_path = data.get('voucher_file_path') or ''
-
-        # If file exists and voucher_no is empty, auto-fill it
-        if purchase.voucher_file_path and not purchase.voucher_no:
-            purchase.voucher_no = purchase.display_id
-
-        if 'payment_status' in data:
-            purchase.payment_status = data.get('payment_status') or 'pending'
-
-        if 'paid_amount' in data:
-            purchase.paid_amount = float(data.get('paid_amount') or 0)
-
-        if 'notes' in data:
-            purchase.notes = data.get('notes') or ''
-
-        if 'work_order_id' in data:
-            purchase.work_order_id = data.get('work_order_id') or None
-
-        purchase.updated_at = datetime.datetime.now()
-
-        if 'items' in data:
-            SupplierPurchaseItem.query.filter_by(purchase_id=purchase_id).delete()
-            for item in (data.get('items') or []):
+            items = data.get('items') or []
+            for item in items:
                 qty = float(item.get('quantity') or 0)
                 rate = float(item.get('rate_per_unit') or 0)
                 total = float(item.get('total_amount') or (qty * rate))
                 purchase_item = SupplierPurchaseItem(
                     purchase_id=purchase.id,
-                    raw_material_id=item.get('raw_material_id'),
+                    raw_material_id=item.get('raw_material_id'),  # Link to master material
                     product_name=item.get('product_name') or '',
                     specification=item.get('specification') or '',
                     quantity=qty,
@@ -619,16 +624,84 @@ class SQLAlchemy(SQLAlchemy):
                 )
                 self.session.add(purchase_item)
 
-        self.session.commit()
-        return True
+            self.session.commit()
+            return purchase.id
+        except Exception:
+            self.session.rollback()
+            raise
+
+    def update_supplier_purchase(self, purchase_id, data):
+        purchase = SupplierPurchase.query.get(purchase_id)
+        if not purchase:
+            return False
+
+        try:
+            if 'supplier_id' in data and data.get('supplier_id') is not None:
+                purchase.supplier_id = int(data.get('supplier_id'))
+
+            if 'purchase_date' in data and data.get('purchase_date') is not None:
+                purchase.purchase_date = data.get('purchase_date')
+
+            if 'voucher_no' in data:
+                purchase.voucher_no = data.get('voucher_no') or ''
+
+            if 'voucher_file_path' in data:
+                purchase.voucher_file_path = data.get('voucher_file_path') or ''
+
+            # If file exists and voucher_no is empty, auto-fill it
+            if purchase.voucher_file_path and not purchase.voucher_no:
+                purchase.voucher_no = purchase.display_id
+
+            if 'payment_status' in data:
+                purchase.payment_status = data.get('payment_status') or 'pending'
+
+            if 'paid_amount' in data:
+                purchase.paid_amount = float(data.get('paid_amount') or 0)
+
+            if 'notes' in data:
+                purchase.notes = data.get('notes') or ''
+
+            if 'work_order_id' in data:
+                purchase.work_order_id = data.get('work_order_id') or None
+
+            purchase.updated_at = datetime.datetime.now()
+
+            if 'items' in data:
+                SupplierPurchaseItem.query.filter_by(purchase_id=purchase_id).delete()
+                for item in (data.get('items') or []):
+                    qty = float(item.get('quantity') or 0)
+                    rate = float(item.get('rate_per_unit') or 0)
+                    total = float(item.get('total_amount') or (qty * rate))
+                    purchase_item = SupplierPurchaseItem(
+                        purchase_id=purchase.id,
+                        raw_material_id=item.get('raw_material_id'),
+                        product_name=item.get('product_name') or '',
+                        specification=item.get('specification') or '',
+                        quantity=qty,
+                        weight=float(item.get('weight') or 0),
+                        unit=item.get('unit') or '',
+                        rate_per_unit=rate,
+                        total_amount=total
+                    )
+                    self.session.add(purchase_item)
+
+            self.session.commit()
+            return True
+        except Exception:
+            self.session.rollback()
+            raise
 
     def delete_supplier_purchase(self, purchase_id):
         purchase = SupplierPurchase.query.get(purchase_id)
         if not purchase:
             return False
-        self.session.delete(purchase)
-        self.session.commit()
-        return True
+        try:
+            self.session.delete(purchase)
+            self.session.commit()
+            return True
+        except Exception:
+            self.session.rollback()
+            raise
 
     def get_all_work_orders(self, limit=1000, offset=0):
         work_orders = WorkOrder.query.order_by(WorkOrder.job_date.desc()).limit(limit).offset(offset).all()
@@ -639,173 +712,35 @@ class SQLAlchemy(SQLAlchemy):
         return work_order.to_dict(include_parts=True) if work_order else None
 
     def add_work_order(self, data):
-        wo_id = generate_id(ID_PREFIX_WORK_ORDER)
-        work_order = WorkOrder(
-            id=wo_id,
-            display_id=wo_id,
-            voucher_id=generate_id(ID_PREFIX_VOUCHER_WORK_ORDER),
-            company_id=safe_int(data.get('company_id'), field='company_id'),
-            job_date=data.get('job_date') or datetime.date.today(),
-            job_name=data.get('job_name') or '',
-            job_description=data.get('job_description') or '',
-            status=data.get('status') or 'open',
-            payment_status=data.get('payment_status') or 'pending',
-            paid_amount=float(data.get('paid_amount') or 0),
-            pending_amount=float(data.get('pending_amount') or 0),
-            quoted_price=float(data.get('quoted_price') or 0),
-            delivery_date=data.get('delivery_date'),
-            labor_cost=float(data.get('labor_cost') or 0),
-            material_cost=float(data.get('material_cost') or 0),
-            total_cost=float(data.get('total_cost') or 0),
-            hard_copy_path=data.get('hard_copy_path') or '',
-            notes=data.get('notes') or ''
-        )
-        self.session.add(work_order)
-        self.session.flush()
-
-        parts = data.get('parts') or []
-        for part in parts:
-            s_id = part.get('supplier_id')
-            
-            # Common part data
-            part_name = part.get('part_name') or ''
-            measurement = part.get('measurement') or ''
-            qty = float(part.get('qty') or 0)
-            weight = float(part.get('weight') or 0)
-            unit = part.get('unit') or ''
-            price = float(part.get('price') or 0)
-            voucher_file_path = part.get('voucher_file_path') or ''
-            raw_mat_id = part.get('raw_material_id')
-
-            if s_id:
-                purchase_display_id = generate_id(ID_PREFIX_PURCHASE)
-                voucher_no = part.get('voucher_no') or ''
-                
-                # If file is uploaded but no custom voucher_no provided, use display_id
-                if voucher_file_path and not voucher_no:
-                    voucher_no = purchase_display_id
-
-                # Create a unified Purchase record for this part
-                purchase = SupplierPurchase(
-                    display_id=purchase_display_id,
-                    voucher_id=generate_id(ID_PREFIX_VOUCHER_PURCHASE),
-                    supplier_id=int(s_id),
-                    purchase_date=work_order.job_date,
-                    voucher_no=voucher_no,
-                    voucher_file_path=voucher_file_path,
-                    work_order_id=work_order.id,
-                    notes=f"Project Part: {part_name}",
-                    payment_status='pending',
-                    paid_amount=0.0
-                )
-                self.session.add(purchase)
-                self.session.flush()
-
-                # Add the item to the purchase
-                purchase_item = SupplierPurchaseItem(
-                    purchase_id=purchase.id,
-                    raw_material_id=raw_mat_id,
-                    product_name=part_name,
-                    specification=measurement,
-                    quantity=qty,
-                    weight=weight,
-                    unit=unit,
-                    rate_per_unit=price / qty if qty > 0 else price,
-                    total_amount=price
-                )
-                self.session.add(purchase_item)
-            else:
-                # No supplier selected, save to WorkOrderPart for tracking
-                new_part = WorkOrderPart(
-                    work_order_id=work_order.id,
-                    raw_material_id=raw_mat_id,
-                    part_name=part_name,
-                    voucher_file_path=voucher_file_path,
-                    measurement=measurement,
-                    unit=unit,
-                    qty=qty,
-                    weight=weight,
-                    price=price
-                )
-                self.session.add(new_part)
-
-        # Add Gallery Documents
-        docs = data.get('documents') or []
-        for doc in docs:
-            f_path = doc.get('file_path')
-            if not f_path:
-                continue
-            new_doc = WorkOrderDocument(
-                work_order_id=work_order.id,
-                file_path=f_path,
-                document_type=doc.get('document_type') or 'Other',
-                notes=doc.get('notes') or ''
+        try:
+            wo_id = generate_id(ID_PREFIX_WORK_ORDER)
+            work_order = WorkOrder(
+                id=wo_id,
+                display_id=wo_id,
+                voucher_id=generate_id(ID_PREFIX_VOUCHER_WORK_ORDER),
+                company_id=safe_int(data.get('company_id'), field='company_id'),
+                job_date=data.get('job_date') or datetime.date.today(),
+                job_name=data.get('job_name') or '',
+                job_description=data.get('job_description') or '',
+                status=data.get('status') or 'open',
+                payment_status=data.get('payment_status') or 'pending',
+                paid_amount=float(data.get('paid_amount') or 0),
+                pending_amount=float(data.get('pending_amount') or 0),
+                quoted_price=float(data.get('quoted_price') or 0),
+                delivery_date=data.get('delivery_date'),
+                labor_cost=float(data.get('labor_cost') or 0),
+                material_cost=float(data.get('material_cost') or 0),
+                total_cost=float(data.get('total_cost') or 0),
+                hard_copy_path=data.get('hard_copy_path') or '',
+                notes=data.get('notes') or ''
             )
-            self.session.add(new_doc)
+            self.session.add(work_order)
+            self.session.flush()
 
-        self.session.commit()
-        return work_order.id
-
-    def update_work_order(self, work_order_id, data):
-        work_order = WorkOrder.query.get(work_order_id)
-        if not work_order:
-            return False
-
-        if 'company_id' in data and data.get('company_id') is not None:
-            work_order.company_id = int(data.get('company_id'))
-
-        if 'job_date' in data and data.get('job_date') is not None:
-            work_order.job_date = data.get('job_date')
-
-        if 'job_name' in data:
-            work_order.job_name = data.get('job_name') or ''
-
-        if 'job_description' in data:
-            work_order.job_description = data.get('job_description') or ''
-
-        if 'status' in data:
-            work_order.status = data.get('status') or 'open'
-
-        if 'payment_status' in data:
-            work_order.payment_status = data.get('payment_status') or 'pending'
-
-        if 'paid_amount' in data:
-            work_order.paid_amount = float(data.get('paid_amount') or 0)
-
-        if 'pending_amount' in data:
-            work_order.pending_amount = float(data.get('pending_amount') or 0)
-
-        if 'quoted_price' in data:
-            work_order.quoted_price = float(data.get('quoted_price') or 0)
-
-        if 'delivery_date' in data:
-            work_order.delivery_date = data.get('delivery_date')
-
-        if 'labor_cost' in data:
-            work_order.labor_cost = float(data.get('labor_cost') or 0)
-
-        if 'material_cost' in data:
-            work_order.material_cost = float(data.get('material_cost') or 0)
-
-        if 'total_cost' in data:
-            work_order.total_cost = float(data.get('total_cost') or 0)
-
-        if 'hard_copy_path' in data:
-            work_order.hard_copy_path = data.get('hard_copy_path') or ''
-
-        if 'notes' in data:
-            work_order.notes = data.get('notes') or ''
-
-        work_order.updated_at = datetime.datetime.now()
-
-        if 'parts' in data:
-            # Cleanup existing linked purchases and parts for this work order
-            SupplierPurchase.query.filter_by(work_order_id=work_order.id).delete()
-            WorkOrderPart.query.filter_by(work_order_id=work_order.id).delete()
-            
-            for part in (data.get('parts') or []):
+            parts = data.get('parts') or []
+            for part in parts:
                 s_id = part.get('supplier_id')
-                
+            
                 # Common part data
                 part_name = part.get('part_name') or ''
                 measurement = part.get('measurement') or ''
@@ -819,10 +754,12 @@ class SQLAlchemy(SQLAlchemy):
                 if s_id:
                     purchase_display_id = generate_id(ID_PREFIX_PURCHASE)
                     voucher_no = part.get('voucher_no') or ''
-                    
+                
+                    # If file is uploaded but no custom voucher_no provided, use display_id
                     if voucher_file_path and not voucher_no:
                         voucher_no = purchase_display_id
 
+                    # Create a unified Purchase record for this part
                     purchase = SupplierPurchase(
                         display_id=purchase_display_id,
                         voucher_id=generate_id(ID_PREFIX_VOUCHER_PURCHASE),
@@ -838,6 +775,7 @@ class SQLAlchemy(SQLAlchemy):
                     self.session.add(purchase)
                     self.session.flush()
 
+                    # Add the item to the purchase
                     purchase_item = SupplierPurchaseItem(
                         purchase_id=purchase.id,
                         raw_material_id=raw_mat_id,
@@ -851,7 +789,7 @@ class SQLAlchemy(SQLAlchemy):
                     )
                     self.session.add(purchase_item)
                 else:
-                    # No supplier selected, save to WorkOrderPart
+                    # No supplier selected, save to WorkOrderPart for tracking
                     new_part = WorkOrderPart(
                         work_order_id=work_order.id,
                         raw_material_id=raw_mat_id,
@@ -865,10 +803,9 @@ class SQLAlchemy(SQLAlchemy):
                     )
                     self.session.add(new_part)
 
-            # Update Gallery Documents
-            # Simple approach: delete all and re-add (like parts)
-            WorkOrderDocument.query.filter_by(work_order_id=work_order.id).delete()
-            for doc in (data.get('documents') or []):
+            # Add Gallery Documents
+            docs = data.get('documents') or []
+            for doc in docs:
                 f_path = doc.get('file_path')
                 if not f_path:
                     continue
@@ -880,27 +817,179 @@ class SQLAlchemy(SQLAlchemy):
                 )
                 self.session.add(new_doc)
 
+            self.session.commit()
+            return work_order.id
+        except Exception:
+            self.session.rollback()
+            raise
 
-        self.session.commit()
-        return True
+    def update_work_order(self, work_order_id, data):
+        work_order = WorkOrder.query.get(work_order_id)
+        if not work_order:
+            return False
+
+        try:
+            if 'company_id' in data and data.get('company_id') is not None:
+                work_order.company_id = int(data.get('company_id'))
+
+            if 'job_date' in data and data.get('job_date') is not None:
+                work_order.job_date = data.get('job_date')
+
+            if 'job_name' in data:
+                work_order.job_name = data.get('job_name') or ''
+
+            if 'job_description' in data:
+                work_order.job_description = data.get('job_description') or ''
+
+            if 'status' in data:
+                work_order.status = data.get('status') or 'open'
+
+            if 'payment_status' in data:
+                work_order.payment_status = data.get('payment_status') or 'pending'
+
+            if 'paid_amount' in data:
+                work_order.paid_amount = float(data.get('paid_amount') or 0)
+
+            if 'pending_amount' in data:
+                work_order.pending_amount = float(data.get('pending_amount') or 0)
+
+            if 'quoted_price' in data:
+                work_order.quoted_price = float(data.get('quoted_price') or 0)
+
+            if 'delivery_date' in data:
+                work_order.delivery_date = data.get('delivery_date')
+
+            if 'labor_cost' in data:
+                work_order.labor_cost = float(data.get('labor_cost') or 0)
+
+            if 'material_cost' in data:
+                work_order.material_cost = float(data.get('material_cost') or 0)
+
+            if 'total_cost' in data:
+                work_order.total_cost = float(data.get('total_cost') or 0)
+
+            if 'hard_copy_path' in data:
+                work_order.hard_copy_path = data.get('hard_copy_path') or ''
+
+            if 'notes' in data:
+                work_order.notes = data.get('notes') or ''
+
+            work_order.updated_at = datetime.datetime.now()
+
+            if 'parts' in data:
+                # Cleanup existing linked purchases and parts for this work order
+                SupplierPurchase.query.filter_by(work_order_id=work_order.id).delete()
+                WorkOrderPart.query.filter_by(work_order_id=work_order.id).delete()
+            
+                for part in (data.get('parts') or []):
+                    s_id = part.get('supplier_id')
+                
+                    # Common part data
+                    part_name = part.get('part_name') or ''
+                    measurement = part.get('measurement') or ''
+                    qty = float(part.get('qty') or 0)
+                    weight = float(part.get('weight') or 0)
+                    unit = part.get('unit') or ''
+                    price = float(part.get('price') or 0)
+                    voucher_file_path = part.get('voucher_file_path') or ''
+                    raw_mat_id = part.get('raw_material_id')
+
+                    if s_id:
+                        purchase_display_id = generate_id(ID_PREFIX_PURCHASE)
+                        voucher_no = part.get('voucher_no') or ''
+                    
+                        if voucher_file_path and not voucher_no:
+                            voucher_no = purchase_display_id
+
+                        purchase = SupplierPurchase(
+                            display_id=purchase_display_id,
+                            voucher_id=generate_id(ID_PREFIX_VOUCHER_PURCHASE),
+                            supplier_id=int(s_id),
+                            purchase_date=work_order.job_date,
+                            voucher_no=voucher_no,
+                            voucher_file_path=voucher_file_path,
+                            work_order_id=work_order.id,
+                            notes=f"Project Part: {part_name}",
+                            payment_status='pending',
+                            paid_amount=0.0
+                        )
+                        self.session.add(purchase)
+                        self.session.flush()
+
+                        purchase_item = SupplierPurchaseItem(
+                            purchase_id=purchase.id,
+                            raw_material_id=raw_mat_id,
+                            product_name=part_name,
+                            specification=measurement,
+                            quantity=qty,
+                            weight=weight,
+                            unit=unit,
+                            rate_per_unit=price / qty if qty > 0 else price,
+                            total_amount=price
+                        )
+                        self.session.add(purchase_item)
+                    else:
+                        # No supplier selected, save to WorkOrderPart
+                        new_part = WorkOrderPart(
+                            work_order_id=work_order.id,
+                            raw_material_id=raw_mat_id,
+                            part_name=part_name,
+                            voucher_file_path=voucher_file_path,
+                            measurement=measurement,
+                            unit=unit,
+                            qty=qty,
+                            weight=weight,
+                            price=price
+                        )
+                        self.session.add(new_part)
+
+                # Update Gallery Documents
+                # Simple approach: delete all and re-add (like parts)
+                WorkOrderDocument.query.filter_by(work_order_id=work_order.id).delete()
+                for doc in (data.get('documents') or []):
+                    f_path = doc.get('file_path')
+                    if not f_path:
+                        continue
+                    new_doc = WorkOrderDocument(
+                        work_order_id=work_order.id,
+                        file_path=f_path,
+                        document_type=doc.get('document_type') or 'Other',
+                        notes=doc.get('notes') or ''
+                    )
+                    self.session.add(new_doc)
+
+
+            self.session.commit()
+            return True
+        except Exception:
+            self.session.rollback()
+            raise
 
     def delete_work_order(self, work_order_id):
         work_order = WorkOrder.query.get(work_order_id)
         if not work_order:
             return False
         
-        # Manually cleanup linked purchases (since they only have a nullable FK)
-        SupplierPurchase.query.filter_by(work_order_id=work_order_id).delete()
+        try:
+            # Manually cleanup linked purchases (since they only have a nullable FK)
+            SupplierPurchase.query.filter_by(work_order_id=work_order_id).delete()
         
-        self.session.delete(work_order)
-        self.session.commit()
-        return True
+            self.session.delete(work_order)
+            self.session.commit()
+            return True
+        except Exception:
+            self.session.rollback()
+            raise
 
     # ==================== ANALYTICS & MESSAGES ====================
     def log_visit(self, url, ip, user_agent):
-        visit = Analytics(page_url=url, visitor_ip=ip, user_agent=user_agent)
-        self.session.add(visit)
-        self.session.commit()
+        try:
+            visit = Analytics(page_url=url, visitor_ip=ip, user_agent=user_agent)
+            self.session.add(visit)
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
 
     def get_visit_stats(self):
         # Basic stats: total visits, visits today
@@ -914,15 +1003,19 @@ class SQLAlchemy(SQLAlchemy):
         }
 
     def add_visitor_message(self, data):
-        msg = VisitorMessage(
-            name=data.get('name'),
-            email=data.get('email'),
-            subject=data.get('subject'),
-            message=data.get('message')
-        )
-        self.session.add(msg)
-        self.session.commit()
-        return msg.id
+        try:
+            msg = VisitorMessage(
+                name=data.get('name'),
+                email=data.get('email'),
+                subject=data.get('subject'),
+                message=data.get('message')
+            )
+            self.session.add(msg)
+            self.session.commit()
+            return msg.id
+        except Exception:
+            self.session.rollback()
+            raise
 
     def get_all_messages(self, limit=50):
         msgs = VisitorMessage.query.order_by(VisitorMessage.created_at.desc()).limit(limit).all()
@@ -930,10 +1023,14 @@ class SQLAlchemy(SQLAlchemy):
 
     def mark_message_read(self, msg_id):
         msg = VisitorMessage.query.get(msg_id)
-        if msg:
-            msg.is_read = True
-            self.session.commit()
-            return True
+        try:
+            if msg:
+                msg.is_read = True
+                self.session.commit()
+                return True
+        except Exception:
+            self.session.rollback()
+            raise
         return False
 
 db = SQLAlchemy()
