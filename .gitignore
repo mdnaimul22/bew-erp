@@ -19,3 +19,7 @@ extracted_odt/
 data/logs/
 automation.log
 services.log
+
+# Isolated workspaces (superpowers)
+.worktrees/
+.superpowers/sdd/
