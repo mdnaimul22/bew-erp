@@ -24,7 +24,7 @@ from src.routers.core import core_bp
 from src.helpers.utils import expand_designation, parse_contact_info
 
 # ── Flask app ────────────────────────────────────────────────
-app = Flask(__name__)
+app = Flask(__name__, template_folder="web/templates", static_folder="web/static")
 app.config.update(
     SECRET_KEY=Settings.SECRET_KEY,
     SQLALCHEMY_DATABASE_URI=Settings.DATABASE_URL,
