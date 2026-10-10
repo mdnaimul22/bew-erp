@@ -160,7 +160,6 @@ def delete_shop(shop_id):
 
 @shops_bp.route('/api/search')
 def api_search():
-    """API endpoint for search (SQL-prefiltered, capped)."""
     query = request.args.get('q', '')
     shops = shop_service.search(query, limit=200) if query else []
     return jsonify(shops)
@@ -168,7 +167,6 @@ def api_search():
 
 @shops_bp.route('/api/shops')
 def api_shops():
-    """API endpoint for all shops (per_page clamped to <= 100)."""
     try:
         page = int(request.args.get('page', 1))
     except (TypeError, ValueError):

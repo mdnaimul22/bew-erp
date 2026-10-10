@@ -125,9 +125,7 @@ def ratelimit_handler(e):
 # ── DB setup ─────────────────────────────────────────────────
 with app.app_context():
     db.create_all()
-    # Task 6: backfill merge-safe guards (client_key column, UNIQUE
-    # indexes) on legacy DB files. Additive only — never rewrites a
-    # table, never fails startup.
+    # Backfill merge-safe guards on legacy DB files (additive; never fails startup).
     from src.db.database import ensure_merge_safe_columns
     _merge_summary = ensure_merge_safe_columns()
     for _skipped in _merge_summary.get('skipped', []):

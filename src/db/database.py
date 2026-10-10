@@ -11,10 +11,8 @@ from src.config import Settings, setup_logger, read_json, exists
 
 logger = setup_logger(Settings.LOG_DIR / "db.log", name="bew.db.database")
 
-# Category cache (Task 5: every-page tax). Template globals call
-# get_all_categories() on every request; categories change rarely, so
-# cache the serialized list briefly. Must be invalidated on any write
-# (add_category, import_from_json).
+# Categories change rarely but are read on every request: cache briefly,
+# invalidate on any category write (add_category, import_from_json).
 _CATEGORIES_CACHE_TTL = 60.0
 _categories_cache_data = None
 _categories_cache_ts = 0.0
@@ -35,9 +33,6 @@ from src.helpers.exceptions import ValidationError
 
 class SQLAlchemy(SQLAlchemy):
     def get_all_categories(self):
-        # Every-page tax cut: template globals fetch categories on each
-        # request, so serve a short-TTL cache. Invalidated on write
-        # (add_category / import_from_json below).
         global _categories_cache_data, _categories_cache_ts
         now = time.monotonic()
         if (_categories_cache_data is not None
@@ -1099,7 +1094,6 @@ class SQLAlchemy(SQLAlchemy):
                     raw_mat_id = part.get('raw_material_id')
 
                     if index < len(existing_purchases):
-                        # Matched row: update details, preserve payment identity.
                         purchase = existing_purchases[index]
                         purchase.supplier_id = safe_int(
                             s_id, field='supplier_id')
@@ -1208,7 +1202,6 @@ class SQLAlchemy(SQLAlchemy):
                 for stale in existing_direct[len(direct_parts):]:
                     self.session.delete(stale)
 
-                # Recompute material/total from the rebuilt parts (client values advisory).
                 work_order.material_cost = accept_or_recompute(
                     parts_cost, data.get('material_cost'))
                 work_order.total_cost = accept_or_recompute(
@@ -1407,7 +1400,7 @@ def _existing_unique_cover(table, cols):
         wanted = set(cols)
         for row in db.session.execute(
                 db.text(f'PRAGMA index_list("{table}")')).fetchall():
-            # row: (seq, name, unique, origin, partial)
+            # PRAGMA index_list row: (seq, name, unique, origin, partial).
             if not row[2]:
                 continue
             covered = {r[2] for r in db.session.execute(

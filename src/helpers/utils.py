@@ -29,10 +29,8 @@ def safe_int(raw: str | None, field: str) -> int:
         raise ValidationError(f"Invalid number for '{field}'.") from None
 
 
-# --- Server-side money recompute (Task 3: ERP hardening) ---
-# Client-supplied line/invoice totals are advisory only. The server recomputes
-# every total as quantity x rate and accepts a client value solely when it
-# agrees with the recomputed figure within 0.01 (rounding tolerance).
+# Money helpers: client-supplied totals are advisory; the server recomputes
+# qty x rate and keeps a client value only within 0.01 (rounding tolerance).
 
 _QTY_KEYS = ("quantity", "qty")
 _RATE_KEYS = ("rate", "rate_per_unit", "unit_price")
