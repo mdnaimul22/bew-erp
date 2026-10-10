@@ -60,6 +60,38 @@ class TestBuyerService:
         result = svc.list_all("NonExistentBuyerQuery12345XYZ")
         assert result == []
 
+    def test_execute_bayer_all_returns_tool_rows(self, app_context):
+        import src.services.buyer as svc
+        result = svc.execute({"tool_name": "bayer_all"})
+        assert result["ok"] is True
+        assert result["tool"] == "bayer_all"
+        assert isinstance(result["buyers"], list)
+        for row in result["buyers"]:
+            assert {"buyer_id", "profile_id", "company_name", "address",
+                    "primary_contact", "contacts_count"} <= set(row)
+
+    def test_execute_bayer_search_requires_query(self, app_context):
+        import src.services.buyer as svc
+        from src.helpers.exceptions import ValidationError
+        with pytest.raises(ValidationError):
+            svc.execute({"tool_name": "bayer_search", "query": "   "})
+        result = svc.execute({"tool_name": "bayer_search", "query": "NonExistentBuyerQuery12345XYZ"})
+        assert result["buyers"] == []
+
+    def test_execute_unknown_tool_rejected(self, app_context):
+        import src.services.buyer as svc
+        from src.helpers.exceptions import ValidationError
+        with pytest.raises(ValidationError):
+            svc.execute({"tool_name": "nope_nope"})
+
+    def test_execute_bayer_profile_not_found(self, app_context):
+        import src.services.buyer as svc
+        from src.helpers.exceptions import NotFoundError, ValidationError
+        with pytest.raises(NotFoundError):
+            svc.execute({"tool_name": "bayer_profile", "buyer_id": 999999})
+        with pytest.raises(ValidationError):
+            svc.execute({"tool_name": "bayer_profile"})
+
 
 class TestInventoryService:
     """Verify inventory service functions."""

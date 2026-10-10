@@ -111,6 +111,51 @@ def delete(buyer_id: int, password: str = ''):
     return success, reason
 
 
+_TOOL_NAMES = ("bayer_all", "bayer_search", "bayer_profile")
+
+
+def _tool_contact(contact):
+    return {
+        "name": contact.get("name"),
+        "designation": contact.get("designation"),
+        "mobiles": contact.get("mobiles") or [],
+        "mobile_display": contact.get("mobile_display") or "-",
+        "whatsapp": contact.get("whatsapp"),
+        "email": contact.get("email"),
+    }
+
+
+def _tool_row(buyer):
+    contacts = buyer.get("contacts") or []
+    primary = next((c for c in contacts if c.get("is_primary")), contacts[0] if contacts else None)
+    return {
+        "buyer_id": buyer.get("id"),
+        "profile_id": buyer.get("display_id"),
+        "company_name": buyer.get("company_name"),
+        "address": buyer.get("address"),
+        "primary_contact": _tool_contact(primary) if primary else None,
+        "contacts_count": len(contacts),
+    }
+
+
+def execute(action):
+    action = action or {}
+    name = action.get("tool_name", "")
+    if name == "bayer_all":
+        return {"ok": True, "tool": name, "buyers": [_tool_row(b) for b in list_all(limit=action.get("limit", 1000))]}
+    if name == "bayer_search":
+        query = (action.get("query") or "").strip()
+        if not query:
+            raise ValidationError("query is required for bayer_search.")
+        return {"ok": True, "tool": name, "query": query,
+                "buyers": [_tool_row(b) for b in list_all(query, limit=action.get("limit", 20))]}
+    if name == "bayer_profile":
+        if action.get("buyer_id") is None:
+            raise ValidationError("buyer_id is required for bayer_profile.")
+        return {"ok": True, "tool": name, "profile": get_profile(action.get("buyer_id"))}
+    raise ValidationError(f"Unknown tool {name!r}. Available: {', '.join(_TOOL_NAMES)}.")
+
+
 def _parse_contacts(form_data) -> list[dict]:
     """Parse dynamic contact fields from form data."""
     names = form_data.getlist('contact_name') if hasattr(form_data, 'getlist') else []
