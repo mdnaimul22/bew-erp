@@ -39,6 +39,31 @@ class TestShopService:
         with pytest.raises(ValidationError):
             svc.create(MultiDict({'name': '', 'category_id': '1'}))
 
+    def test_execute_shop_search_returns_tool_rows(self, app_context):
+        import src.services.shop as svc
+        from src.helpers.exceptions import ValidationError
+        with pytest.raises(ValidationError):
+            svc.execute({"tool_name": "shop_search", "query": "  "})
+        result = svc.execute({"tool_name": "shop_search", "query": "ZZZ-no-match-123"})
+        assert result["ok"] is True
+        assert result["shops"] == []
+
+    def test_execute_shop_all_and_detail(self, app_context):
+        import src.services.shop as svc
+        from src.helpers.exceptions import NotFoundError, ValidationError
+        result = svc.execute({"tool_name": "shop_all", "limit": 5})
+        assert result["ok"] is True
+        assert isinstance(result["total"], int)
+        for row in result["shops"]:
+            assert {"shop_id", "name", "proprietor", "address", "mobile",
+                    "whatsapp", "products", "category_name", "tags"} <= set(row)
+        with pytest.raises(ValidationError):
+            svc.execute({"tool_name": "shop_detail"})
+        with pytest.raises(NotFoundError):
+            svc.execute({"tool_name": "shop_detail", "shop_id": 999999})
+        with pytest.raises(ValidationError):
+            svc.execute({"tool_name": "nope"})
+
 
 class TestBuyerService:
     """Verify buyer service functions."""

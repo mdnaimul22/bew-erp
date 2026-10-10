@@ -153,6 +153,43 @@ def search_by_tag(tag_name: str):
     return db.search_shops_by_tag(tag_name)
 
 
+_TOOL_NAMES = ("shop_search", "shop_detail", "shop_all")
+
+
+def _tool_row(shop):
+    tags = shop.get("tags") or []
+    return {
+        "shop_id": shop.get("id"),
+        "name": shop.get("name"),
+        "proprietor": shop.get("proprietor"),
+        "address": shop.get("address"),
+        "mobile": shop.get("mobile"),
+        "whatsapp": shop.get("whatsapp"),
+        "products": shop.get("products"),
+        "category_name": shop.get("category_name"),
+        "tags": [t.get("name") for t in tags if isinstance(t, dict)],
+    }
+
+
+def execute(action):
+    action = action or {}
+    name = action.get("tool_name", "")
+    if name == "shop_search":
+        query = (action.get("query") or "").strip()
+        if not query:
+            raise ValidationError("query is required for shop_search.")
+        return {"ok": True, "tool": name, "query": query,
+                "shops": [_tool_row(s) for s in search(query, limit=action.get("limit", 20))]}
+    if name == "shop_detail":
+        if action.get("shop_id") is None:
+            raise ValidationError("shop_id is required for shop_detail.")
+        return {"ok": True, "tool": name, "shop": get(action.get("shop_id"))}
+    if name == "shop_all":
+        shops, total = list_all(limit=action.get("limit", 20), offset=action.get("offset", 0))
+        return {"ok": True, "tool": name, "total": total, "shops": [_tool_row(s) for s in shops]}
+    raise ValidationError(f"Unknown tool {name!r}. Available: {', '.join(_TOOL_NAMES)}.")
+
+
 # ---- Private helpers ----
 
 def _resolve_category(form_data):
