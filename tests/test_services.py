@@ -129,6 +129,29 @@ class TestSaleService:
         result = svc.get(999999)
         assert result is None
 
+    def test_execute_sale_all_returns_tool_rows(self, app_context):
+        import src.services.sale as svc
+        result = svc.execute({"tool_name": "sale_all"})
+        assert result["ok"] is True
+        assert isinstance(result["sales"], list)
+        for row in result["sales"]:
+            assert {"sale_id", "voucher_id", "buyer_id", "buyer_name",
+                    "sale_date", "total_amount", "item_count"} <= set(row)
+
+    def test_execute_sale_search_and_detail(self, app_context):
+        import src.services.sale as svc
+        from src.helpers.exceptions import NotFoundError, ValidationError
+        with pytest.raises(ValidationError):
+            svc.execute({"tool_name": "sale_search", "query": "  "})
+        with pytest.raises(ValidationError):
+            svc.execute({"tool_name": "sale_detail"})
+        with pytest.raises(NotFoundError):
+            svc.execute({"tool_name": "sale_detail", "sale_id": 999999})
+        with pytest.raises(ValidationError):
+            svc.execute({"tool_name": "nope"})
+        result = svc.execute({"tool_name": "sale_search", "query": "ZZZ-no-match-123"})
+        assert result["sales"] == []
+
 
 class TestMoneyRecompute:
     """Task 3: server-side money recompute helpers (src/helpers/utils.py)."""

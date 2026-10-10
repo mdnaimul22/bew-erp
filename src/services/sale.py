@@ -3,7 +3,7 @@ import datetime
 from pydantic import ValidationError as PydanticValidationError
 from src.config import setup_logger, Settings
 from src.db.database import db
-from src.helpers.exceptions import ValidationError
+from src.helpers.exceptions import ValidationError, NotFoundError
 from src.helpers.upload import save_upload
 from src.helpers.auth import verify_delete_password
 from src.helpers.utils import safe_float
@@ -151,3 +151,39 @@ def _parse_sale_items(form_data) -> list[dict]:
         })
 
     return items
+
+
+_TOOL_NAMES = ("sale_all", "sale_search", "sale_detail")
+
+
+def _tool_row(sale):
+    return {
+        "sale_id": sale.get("id"),
+        "voucher_id": sale.get("display_id"),
+        "buyer_id": sale.get("buyer_id"),
+        "buyer_name": sale.get("buyer_name"),
+        "sale_date": sale.get("sale_date_display"),
+        "total_amount": sale.get("total_amount"),
+        "item_count": sale.get("item_count"),
+    }
+
+
+def execute(action):
+    action = action or {}
+    name = action.get("tool_name", "")
+    if name == "sale_all":
+        return {"ok": True, "tool": name, "sales": [_tool_row(s) for s in list_all(limit=action.get("limit", 100))]}
+    if name == "sale_search":
+        query = (action.get("query") or "").strip()
+        if not query:
+            raise ValidationError("query is required for sale_search.")
+        return {"ok": True, "tool": name, "query": query,
+                "sales": [_tool_row(s) for s in list_all(query, limit=action.get("limit", 20))]}
+    if name == "sale_detail":
+        if action.get("sale_id") is None:
+            raise ValidationError("sale_id is required for sale_detail.")
+        detail = get(action.get("sale_id"))
+        if not detail:
+            raise NotFoundError("Sale", action.get("sale_id"))
+        return {"ok": True, "tool": name, "sale": detail}
+    raise ValidationError(f"Unknown tool {name!r}. Available: {', '.join(_TOOL_NAMES)}.")
