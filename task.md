@@ -38,6 +38,24 @@
   2. `web/templates/dashboard_base.html` এবং অন্যান্য টেমপ্লেটে `<img src="...logo.svg">` ট্যাগে সরাসরি `width="28" height="28"` এবং `loading="eager"` দেওয়া হয়েছে।
   3. `web/static/img/logo.svg` ফাইলের সাইজ ২৮৬ KB থেকে ১৭৭ KB-তে কমিয়ে অপ্টিমাইজ করা হয়েছে (-৩৮%)।
 
+### ৫. রেন্ডার-ব্লকিং অপ্টিমাইজেশন (Render-Blocking Requests: ~৩,৫৭০ms সাশ্রয় ও ৯০+ স্কোর অর্জন)
+- [ ] **বটলনেক বিশ্লেষণ (PageSpeed Insights Report):**
+  - `components.css`: ১,২০০ ms (৮.৬ KiB)
+  - `tokens.css`: ৮০০ ms (২৩.২ KiB)
+  - `cdn.tailwindcss.com/3.4.17`: ৭৮০ ms (১২৪ KiB রানটাইম কম্পাইলার)
+  - `Material Icons`: ৭৫০ ms (১.১ KiB)
+  - `Google Fonts (css2)`: ৭৫০ ms (৩.২ KiB)
+  - **সর্বমোট অপচয়:** ৩,৫৭০ ms (~৩.৬ সেকেন্ড ফার্স্ট পেইন্ট আটকে থাকে)।
+
+- [ ] **বাস্তবায়ন নির্দেশ (Tasks for Agents):**
+  1. **গুগল ফন্ট ও মেটেরিয়াল আইকন আনব্লক (`web/templates/layout.html`):**
+     - ফন্ট ও আইকন লিঙ্কগুলোকে নন-ব্লকিং অ্যাসিনক্রোনাস লোডিংয়ে রূপান্তর করো (`media="print" onload="this.media='all'"` এবং `<noscript>` ফলব্যাক)।
+  2. **লোকাল CSS ক্যাশিং ও প্রিলোড (`main.py` + `layout.html`):**
+     - `web/templates/layout.html`-এ `tokens.css` এবং `components.css`-এর জন্য `<link rel="preload" as="style" ...>` যুক্ত করো।
+     - `main.py`-তে Flask অ্যাপ কনফিগারেশনে স্ট্যাটিক ফাইলের জন্য ক্যাশিং হেডার নিশ্চিত করো: `app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 31536000` (১ বছর ক্যাশ) যাতে প্রতি রিকোয়েস্টে টানেল দিয়ে নতুন করে ৮০০ms ডাউনলোড না হয়।
+  3. **Tailwind CDN অপ্টিমাইজেশন:**
+     - `<script src="https://cdn.tailwindcss.com"></script>`-এর লোডিং অপ্টিমাইজ করো যাতে হেড রেন্ডারিং না থামায়।
+
 ---
 
 ## 🔍 এজেন্টদের কাজের অডিট ও ফিডব্যাক লগ (Review Notes)
@@ -95,3 +113,5 @@
 - **[Coordinator @ 19:03]:** Timer sesh, Review (19:00) dekhlam — sob stable, commit/push er jonno user permission er opekkha. Notun kaj nei. No commit/push. Porer timer chalu.
 - **[Senior Supervisor Review @ 19:05 (Iteration 10)]:**
   ব্যবহারকারীর নির্দেশে সুপারভাইজর নিজে চূড়ান্ত কমিট ও পুশ সম্পন্ন করেছে (Commit: ad28a8 -> origin/development)। ১৩টি ফাইল সফলভাবে আপলোড হয়েছে। সমস্ত কাজ সম্পন্ন।
+- **[Supervisor Directive @ 19:08 (Dispatching P5 Tasks)]:**
+  PageSpeed-এর ৩,৫৭০ms রেন্ডার-ব্লকিং সমস্যা সমাধানের জন্য নতুন সেকশন ৫ (P5) নির্দেশাবলী যোগ করা হয়েছে। কোঅর্ডিনেটর ছোট এজেন্টদের দিয়ে ৩টি সাব-টাস্ক (Google Font/Icon async media-swap, Flask static cache-control header, এবং CSS preload) সম্পন্ন করাক। যথারীতি **git commit এবং git push সম্পূর্ণ হারাম/নিষিদ্ধ**। কাজ শেষ হলে সুপারভাইজর আবার অডিট করবে।
