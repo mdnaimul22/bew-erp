@@ -3,25 +3,26 @@
 
 <head>
     <meta charset="UTF-8">
-    {# FOUC prevention: set theme, fonts, and hide Alpine content BEFORE any CSS loads #}
+    {# Paint-safe: only [x-cloak] hides dynamic bits. Never hide <body> — that blocks FCP (NO_FCP). #}
     <style>
         [x-cloak] { display: none !important; }
-        .alpine-loading { opacity: 0; }
-        body { transition: opacity 0.15s ease-in; }
     </style>
+    {# Minimal inline theme/scale guard: <1ms, touches only <html>, never blocks body paint. #}
     <script>
         (function() {
-            var root = document.documentElement;
-            root.setAttribute('data-theme', localStorage.getItem('bew-theme') || 'light');
-            var scales = {'s':'11px','m':'12px','l':'13px','xl':'14px'};
-            root.style.fontSize = scales[localStorage.getItem('bew-app-scale') || 'm'] || '12px';
-            var fonts = {
-                'default': "'Noto Sans Bengali', system-ui, -apple-system, sans-serif",
-                'inter': "'Inter', 'Noto Sans Bengali', sans-serif",
-                'poppins': "'Poppins', 'Noto Sans Bengali', sans-serif",
-                'roboto': "'Roboto', 'Noto Sans Bengali', sans-serif"
-            };
-            root.style.setProperty('--font-primary', fonts[localStorage.getItem('bew-font-family') || 'default']);
+            try {
+                var root = document.documentElement;
+                root.setAttribute('data-theme', localStorage.getItem('bew-theme') || 'light');
+                var scales = {'s':'11px','m':'12px','l':'13px','xl':'14px'};
+                root.style.fontSize = scales[localStorage.getItem('bew-app-scale') || 'm'] || '12px';
+                var fonts = {
+                    'default': "'Noto Sans Bengali', system-ui, -apple-system, sans-serif",
+                    'inter': "'Inter', 'Noto Sans Bengali', sans-serif",
+                    'poppins': "'Poppins', 'Noto Sans Bengali', sans-serif",
+                    'roboto': "'Roboto', 'Noto Sans Bengali', sans-serif"
+                };
+                root.style.setProperty('--font-primary', fonts[localStorage.getItem('bew-font-family') || 'default']);
+            } catch (e) { /* localStorage unavailable (private mode/bot) — fall back to defaults */ }
         })();
     </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -36,9 +37,10 @@
 
     {# ── 3. Fonts ────────────────────────────────────────────── #}
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;500;600;700&family=Inter:wght@300;400;700&family=Poppins:wght@300;400;500;600;700&family=Roboto:wght@300;400;500;700&display=swap"
           rel="stylesheet">
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons&display=swap" rel="stylesheet">
 
     {# ── 4. Tailwind CSS CDN → Token-Driven Config ───────────── #}
     <script src="https://cdn.tailwindcss.com"></script>
@@ -125,37 +127,15 @@
     {% block extra_head %}{% endblock %}
 </head>
 
-<body class="font-bengali bg-[var(--color-bg)] text-[var(--color-text)] min-h-screen flex flex-col antialiased alpine-loading"
-      x-data @alpine:initialized.window="$el.classList.remove('alpine-loading')">
+<body class="font-bengali bg-[var(--color-bg)] text-[var(--color-text)] min-h-screen flex flex-col antialiased">
 
     {# ══════════════════════════════════════════════════════════════
        MAIN CONTENT — Flash messages + page content
        ══════════════════════════════════════════════════════════════ #}
     <main class="w-full flex-grow relative" role="main" id="main-content">
         {% block flash_messages %}
-        {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-        <div class="fixed top-[var(--header-height)] right-4 z-[2000] w-full max-w-sm space-y-2 mt-4 pointer-events-none" aria-live="polite">
-            {% for category, message in messages %}
-            <div x-data="{ show: true }" x-show="show"
-                 x-init="setTimeout(() => show = false, 5000)"
-                 x-transition:leave="transition ease-in duration-300"
-                 x-transition:leave-start="opacity-100"
-                 x-transition:leave-end="opacity-0 translate-x-8"
-                 role="alert"
-                 class="px-4 py-3 shadow-lg pointer-events-auto rounded-[var(--radius-sm)] flex justify-between items-center text-sm
-                        {% if category == 'success' %}bg-[var(--color-surface)] text-[var(--color-success)] border-l-4 border-[var(--color-success)]
-                        {% elif category == 'error' %}bg-[var(--color-surface)] text-[var(--color-danger)] border-l-4 border-[var(--color-danger)]
-                        {% else %}bg-[var(--color-surface)] text-[var(--color-primary)] border-l-4 border-[var(--color-primary)]
-                        {% endif %}">
-                <span>{{ message }}</span>
-                <button @click="show = false" class="text-current opacity-70 hover:opacity-100 ml-4"
-                        aria-label="{{ _('Close') }}">×</button>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-        {% endwith %}
+        {# Universal toast hub — single shared container (see components/_notifications.html) #}
+        {% include 'components/_notifications.html' %}
         {% endblock %}
 
         {% block layout_content %}{% endblock %}

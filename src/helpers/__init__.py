@@ -14,6 +14,7 @@ from .tailscale import (
     setup_tailscale_ingress,
     setup_tailscale_ingress_sync,
 )
+from .toast import register_toast_bridge
 
 __all__ = [
     "ValidationError",
@@ -28,4 +29,5 @@ __all__ = [
     "ensure_tailscale_funnel",
     "setup_tailscale_ingress",
     "setup_tailscale_ingress_sync",
+    "register_toast_bridge",
 ]

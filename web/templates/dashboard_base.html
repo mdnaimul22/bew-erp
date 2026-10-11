@@ -1,7 +1,6 @@
 {% extends "layout.html" %}
 
-{# Override flash — dashboard shows them as bottom-right toasts #}
-{% block flash_messages %}{% endblock %}
+{# flash_messages inherited from layout.html — universal toast hub #}
 
 {% block extra_head %}
 {# Pre-apply sidebar state BEFORE Alpine to prevent flicker #}
@@ -10,14 +9,17 @@
 </style>
 <script>
 (function(){
+    try {
     var c = JSON.parse(localStorage.getItem('bew-sidebar-collapsed') || 'false');
     var w = parseInt(localStorage.getItem('bew-sidebar-width') || '260', 10);
     var s = document.getElementById('sidebar-preload');
+    if (!s) return;
     if (c) {
         s.textContent = '#app-sidebar{width:64px!important;min-width:64px!important}#app-sidebar .sidebar-label{display:none!important}#app-sidebar .sidebar-nav-item{justify-content:center;padding-left:0;padding-right:0}';
     } else {
         s.textContent = '#app-sidebar{width:'+w+'px;min-width:'+w+'px}';
     }
+    } catch (e) { /* no localStorage (bot/private mode) — keep default 280px CSS */ }
 })();
 </script>
 {% endblock %}
@@ -48,28 +50,28 @@
         window.addEventListener('popstate', () => { currentPath = window.location.pathname; });
         $nextTick(() => { document.getElementById('sidebar-preload')?.remove(); });
      "
-     class="flex h-screen overflow-hidden bg-[var(--color-bg)]"
+     class="flex app-shell overflow-hidden bg-[var(--color-bg)]"
      :class="resizing ? 'select-none cursor-col-resize' : ''">
 
     {# ── MOBILE OVERLAY ─────────────────────────────────── #}
     <div x-show="$store.sidebar.mobileOpen" x-cloak
          @click="$store.sidebar.closeMobile()"
          x-transition.opacity.duration.200ms
-         class="fixed inset-0 bg-black/40 backdrop-blur-sm z-[998] md:hidden"></div>
+         class="fixed inset-0 bg-black/40 backdrop-blur-sm z-overlay md:hidden"></div>
 
     {# ══════════════════════════════════════════════════════
        SIDEBAR
        ══════════════════════════════════════════════════════ #}
     <aside id="app-sidebar"
            class="fixed top-0 left-0 h-full bg-[var(--color-surface)] border-r border-[var(--color-border)]
-                  flex flex-col z-[999] transition-[width,min-width,transform] duration-300
+                  flex flex-col z-sidebar transition-[width,min-width,transform] duration-300
                   md:relative md:translate-x-0 shrink-0"
-           :class="$store.sidebar.mobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full md:translate-x-0'"
-           :style="window.innerWidth >= 768
-                     ? ($store.sidebar.collapsed
-                         ? 'width:64px;min-width:64px'
-                         : 'width:'+$store.sidebar.width+'px;min-width:'+$store.sidebar.width+'px')
-                     : 'width:280px'">
+           :class="{
+               'translate-x-0 shadow-2xl': $store.sidebar.mobileOpen,
+               '-translate-x-full md:translate-x-0 md:shadow-none': !$store.sidebar.mobileOpen,
+               'sidebar-collapsed': $store.sidebar.collapsed
+           }"
+           :style="'--sidebar-w:' + $store.sidebar.width + 'px'">
 
         {# Sidebar Header #}
         <div class="h-[52px] flex items-center border-b border-[var(--color-border)] shrink-0"
@@ -78,21 +80,21 @@
                class="sidebar-label flex items-center gap-2 no-underline overflow-hidden"
                hx-get="{{ url_for('dashboard_home.index') }}" hx-target="#content-area" hx-select="#content-area"
                hx-swap="innerHTML" hx-push-url="true" @click.prevent>
-                <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="BEW" class="h-7 w-auto shrink-0">
+                <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="BEW" width="28" height="28" loading="eager" class="h-7 w-auto shrink-0">
                 <span class="text-sm font-bold text-[var(--color-text)] whitespace-nowrap">{{ _('BEW') }}</span>
             </a>
-            <button @click="window.innerWidth < 768 ? $store.sidebar.closeMobile() : $store.sidebar.toggle()"
+            <button @click="$store.sidebar.mobileOpen ? $store.sidebar.closeMobile() : $store.sidebar.toggle()"
                     class="flex items-center justify-center w-8 h-8 rounded-lg
                            text-[var(--color-text-muted)] hover:bg-[var(--color-bg)] hover:text-[var(--color-primary)]
                            transition-colors shrink-0">
                 <span class="material-icons text-xl transition-transform duration-300"
-                      :class="$store.sidebar.collapsed ? 'rotate-180' : ''"
-                      x-text="window.innerWidth < 768 ? 'close' : 'chevron_left'"></span>
+                      :class="($store.sidebar.collapsed && !$store.sidebar.mobileOpen) ? 'rotate-180' : ''"
+                      x-text="$store.sidebar.mobileOpen ? 'close' : 'chevron_left'"></span>
             </button>
         </div>
 
         {# Nav Items #}
-        <nav class="flex-1 overflow-y-auto overflow-x-hidden py-2 px-2">
+        <nav class="slick-scroll flex-1 overflow-y-auto overflow-x-hidden py-2 px-2">
             {% set nav = [
                 (url_for('dashboard_home.index'), 'dashboard', _('Dashboard'), 'exact:/dashboard'),
                 (url_for('buyers.buyer_list'), 'people', _('Buyers'), 'prefix:/dashboard/buyers'),
@@ -241,10 +243,11 @@
     {# ── CATEGORY PANEL ───────────────────────────────────── #}
     <template x-if="$store.catPanel.open">
         <div class="fixed inset-0 z-[996]" @click.self="$store.catPanel.close()">
-            <div class="fixed top-0 h-full w-[220px] bg-[var(--color-surface)] border-r border-[var(--color-border)]
-                        shadow-xl z-[997] overflow-y-auto"
+            <div class="cat-panel fixed top-0 h-full w-[220px] bg-[var(--color-surface)] border-r border-[var(--color-border)]
+                        shadow-xl z-overlay overflow-y-auto slick-scroll"
                  @click.stop
-                 :style="'left:' + (window.innerWidth >= 768 ? ($store.sidebar.collapsed ? 64 : $store.sidebar.width) : 280) + 'px'">
+                 :class="{ 'panel-collapsed': $store.sidebar.collapsed }"
+                 :style="'--sidebar-w:' + $store.sidebar.width + 'px'">
                 <div class="p-4">
                     <div class="flex items-center justify-between mb-3">
                         <h3 class="text-xs font-bold text-[var(--color-text)] uppercase tracking-wider">{{ _('Categories') }}</h3>
@@ -328,31 +331,7 @@
             </div>
         </div>
 
-        {# Bottom Toast Bar — flash messages #}
-        {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-        <div class="fixed bottom-4 right-4 z-[2000] w-full max-w-sm space-y-2" aria-live="polite">
-            {% for category, message in messages %}
-            <div x-data="{ show: true }" x-show="show"
-                 x-init="setTimeout(() => show = false, 5000)"
-                 x-transition:leave="transition ease-in duration-300"
-                 x-transition:leave-start="opacity-100 translate-y-0"
-                 x-transition:leave-end="opacity-0 translate-y-2"
-                 role="alert"
-                 class="px-4 py-2.5 rounded-lg flex items-center gap-3 text-sm shadow-lg border
-                        {% if category == 'success' %}bg-[var(--color-success)] text-white border-[var(--color-success)]
-                        {% elif category == 'error' %}bg-[var(--color-danger)] text-white border-[var(--color-danger)]
-                        {% else %}bg-[var(--color-primary)] text-white border-[var(--color-primary-dark)]{% endif %}">
-                <span class="material-icons text-base">
-                    {% if category == 'success' %}check_circle{% elif category == 'error' %}error{% else %}info{% endif %}
-                </span>
-                <span class="flex-1">{{ message }}</span>
-                <button @click="show = false" class="text-white/70 hover:text-white ml-2">×</button>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-        {% endwith %}
+        {# Toasts render via the universal hub in layout.html (components/_notifications.html) #}
     </div>
 </div>
 

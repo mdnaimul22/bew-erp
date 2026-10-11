@@ -12,7 +12,7 @@
             <div class="flex items-center gap-0.5">
                 <a href="{{ url_for('shops.index') }}"
                     class="flex items-center gap-2 text-primary no-underline font-bold text-xl tracking-tight">
-                    <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="BEW Logo"
+                    <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="BEW Logo" width="85" height="85" loading="eager"
                         class="h-[60px] w-auto md:h-[85px]">
                     <span class="text-base md:text-xl">{{ _('Bangladesh Engineering Workshop') }}</span>
                 </a>
@@ -82,7 +82,7 @@
 
             {# Brand #}
             <div class="flex items-center gap-2 shrink-0">
-                <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="BEW Logo"
+                <img src="{{ url_for('static', filename='img/logo.svg') }}" alt="BEW Logo" width="28" height="28" loading="eager"
                     class="h-7 w-auto">
                 <span class="text-text-main text-sm font-semibold">{{ _('Bangladesh Engineering Workshop') }}</span>
             </div>

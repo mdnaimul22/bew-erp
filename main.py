@@ -22,6 +22,7 @@ from src.routers.inventory import inventory_bp
 from src.routers.work_orders import work_orders_bp
 from src.routers.core import core_bp
 from src.helpers.utils import expand_designation, parse_contact_info
+from src.helpers import register_toast_bridge
 
 # ── Flask app ────────────────────────────────────────────────
 app = Flask(__name__, template_folder="web/templates", static_folder="web/static")
@@ -91,6 +92,8 @@ app.register_blueprint(work_orders_bp)
 app.register_blueprint(purchases_bp)
 app.register_blueprint(sales_bp)
 app.register_blueprint(core_bp)
+
+register_toast_bridge(app)
 
 @app.route('/robots.txt')
 def static_from_root():

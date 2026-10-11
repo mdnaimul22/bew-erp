@@ -1,0 +1,91 @@
+{# ═══════════════════════════════════════════════════════════════
+   BEW Universal Toast Hub — shared container + Flask/HTMX bridge
+   Included once via layout.html `flash_messages` block (dashboard pages
+   inherit it — do NOT add a second copy in dashboard_base.html).
+
+   SERVER → CLIENT paths (all funnel into $store.toast, nothing is lost
+   on HTMX partial swaps of #content-area):
+   1. Full page render: flash(msg, cat) → seeded below via x-init + tojson.
+   2. HTMX request: flash() + HX-Request → main.py after_this_request hook
+      (see src/helpers/toast.py) re-emits queued flashes as HX-Trigger
+      `{"bewToast": [{message, type}]}` → picked up by the listener below.
+   3. Manual partial: embed <div data-toast-message=".." data-toast-type="success">
+      (works with hx-swap-oob too) → picked up on htmx:afterSwap.
+   4. Pure JS: $store.toast.success('...') / .error() / .warning() / .info()
+      / .push(msg, type) / .dismiss(id) / .clear(). Auto-dismiss ~5s.
+
+   Mobile: left-4 + right-4 with sm:left-auto keeps it full-width-safe,
+   max-w caps width, break-words prevents overflow.
+   ═══════════════════════════════════════════════════════════════ #}
+<div id="toast-hub" x-data
+     class="fixed bottom-4 right-4 left-4 sm:left-auto z-toast pointer-events-none"
+     aria-live="polite" aria-atomic="false">
+    <div id="toast-stack"
+         class="flex flex-col gap-2 items-stretch sm:items-end">
+        <template x-for="t in $store.toast.items" :key="t.id">
+            <div x-show="true"
+                 x-transition:enter="transition ease-out duration-200"
+                 x-transition:enter-start="opacity-0 translate-y-2"
+                 x-transition:enter-end="opacity-100 translate-y-0"
+                 x-transition:leave="transition ease-in duration-300"
+                 x-transition:leave-start="opacity-100"
+                 x-transition:leave-end="opacity-0 translate-x-8"
+                 role="alert"
+                 class="pointer-events-auto w-auto sm:w-full sm:max-w-sm max-w-[calc(100vw-2rem)] px-4 py-2.5 rounded-lg shadow-lg border flex items-center gap-3 text-sm break-words"
+                 :class="{
+                     'bg-[var(--color-success)] text-white border-[var(--color-success)]': t.type === 'success',
+                     'bg-[var(--color-danger)] text-white border-[var(--color-danger)]': t.type === 'error',
+                     'bg-[var(--color-warning)] text-white border-[var(--color-warning)]': t.type === 'warning',
+                     'bg-[var(--color-primary)] text-white border-[var(--color-primary-dark)]': t.type === 'info'
+                 }">
+                <span class="material-icons text-base shrink-0"
+                      x-text="t.type === 'success' ? 'check_circle' : t.type === 'error' ? 'error' : t.type === 'warning' ? 'warning' : 'info'"></span>
+                <span class="flex-1 min-w-0 break-words" x-text="t.message"></span>
+                <button @click="$store.toast.dismiss(t.id)"
+                        class="text-white/70 hover:text-white ml-2 shrink-0"
+                        aria-label="{{ _('Close') }}">×</button>
+            </div>
+        </template>
+    </div>
+
+    {# ── Bridge (1): seed Flask flash() queue on full page render ── #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <span x-init="{% for category, message in messages %}$store.toast.push({{ message|tojson }}, {{ category|tojson }});{% endfor %}"></span>
+    {% endif %}
+    {% endwith %}
+</div>
+
+{# ── Bridge (2)+(3): HTMX HX-Trigger + data-attribute fragments ── #}
+<script>
+(function () {
+    function bewToastPush(detail) {
+        if (!window.Alpine || !Alpine.store) return;
+        var toast = Alpine.store('toast');
+        if (!toast) return;
+        var list = detail && detail.bewToast;
+        if (!list) return;
+        if (!Array.isArray(list)) list = [list];
+        list.forEach(function (item) {
+            if (typeof item === 'string') { toast.push(item, 'info'); return; }
+            if (item && item.message) toast.push(item.message, item.type || 'info');
+        });
+    }
+    // HX-Trigger header (JSON): {"bewToast": [{"message": "..", "type": "success"}]}
+    document.addEventListener('htmx:afterRequest', function (e) {
+        var header = e.detail && e.detail.xhr && e.detail.xhr.getResponseHeader('HX-Trigger');
+        if (!header) return;
+        try { bewToastPush(JSON.parse(header)); } catch (err) { /* not a toast trigger */ }
+    });
+    // Custom DOM event escape hatch: window.dispatchEvent(new CustomEvent('bew:toast', {detail: {...}}))
+    window.addEventListener('bew:toast', function (e) { bewToastPush({ bewToast: [e.detail] }); });
+    // Inline/oob fragments: <div data-toast-message=".." data-toast-type="success">
+    document.addEventListener('htmx:afterSwap', function (e) {
+        if (!e.detail || !e.detail.target || !e.detail.target.querySelectorAll) return;
+        e.detail.target.querySelectorAll('[data-toast-message]').forEach(function (el) {
+            bewToastPush({ bewToast: [{ message: el.getAttribute('data-toast-message'), type: el.getAttribute('data-toast-type') || 'info' }] });
+            el.removeAttribute('data-toast-message');
+        });
+    });
+})();
+</script>

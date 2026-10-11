@@ -153,6 +153,36 @@ document.addEventListener('alpine:init', () => {
             this.actionUrl = '';
         }
     });
+
+    // ── Toast Hub Store ────────────────────────────────
+    // Universal queueable toast notifications. Auto-dismiss ~5s.
+    // Usage: $store.toast.success('Saved'), $store.toast.error('Failed'),
+    //        $store.toast.push('Hi', 'info'), $store.toast.dismiss(id)
+    Alpine.store('toast', {
+        items: [],
+        nextId: 1,
+        duration: 5000,
+
+        push(message, type) {
+            var valid = ['success', 'error', 'warning', 'info'];
+            var t = valid.indexOf(type) !== -1 ? type : 'info';
+            var id = this.nextId++;
+            this.items.push({ id: id, message: String(message), type: t });
+            setTimeout(() => this.dismiss(id), this.duration);
+            return id;
+        },
+
+        success(message) { return this.push(message, 'success'); },
+        error(message) { return this.push(message, 'error'); },
+        warning(message) { return this.push(message, 'warning'); },
+        info(message) { return this.push(message, 'info'); },
+
+        dismiss(id) {
+            this.items = this.items.filter((t) => t.id !== id);
+        },
+
+        clear() { this.items = []; }
+    });
 });
 
 // ── Header Sync: runs after Alpine init + every HTMX content swap ──

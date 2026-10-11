@@ -1,4 +1,7 @@
 {# ── Alert Macros ─── #}
+{# NOTE: fixed-position toasts now live in the universal hub
+   (components/_notifications.html via layout.html). The flash_messages()
+   macro below is kept for inline page-level alerts only. #}
 
 {% macro flash_messages() %}
 {% with messages = get_flashed_messages(with_categories=true) %}
