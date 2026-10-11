@@ -31,18 +31,21 @@ def _configure_system(log_dir: Path, is_production: bool) -> None:
     _system_configured = True
 
 
-def setup_logger(log_path: Path, name: str) -> logging.Logger:
-    """
-    Return a fully configured Logger for `name`. Standardized for the project.
+def setup_logger(
+    log_path: Path | None = None,
+    name: str = "app",
+    boss_name: str | None = None,
+    his_name: str = "",
+) -> logging.Logger:
+    if boss_name is not None:
+        name = his_name or boss_name
+        from .settings import Settings
+        clean_boss = boss_name.removesuffix(".txt").removesuffix(".log")
+        log_path = Settings.LOG_DIR / f"{clean_boss}.log"
+    elif log_path is None:
+        from .settings import Settings
+        log_path = Settings.LOG_DIR / f"{name}.log"
 
-    Behaviour
-    ---------
-    - development : console → DEBUG  |  file → DEBUG
-    - production  : console → WARNING |  file → INFO
-
-    The logger is registered in _registry so repeated calls
-    with the same name return the cached instance immediately.
-    """
     if name in _registry:
         return _registry[name]
 

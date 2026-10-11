@@ -3,7 +3,8 @@ import json
 import pickle
 import shutil
 from pathlib import Path
-from typing import Any
+import yaml
+from typing import Any, Union
 
 from .paths import PROJECT_ROOT, resolve_sandboxed
 
@@ -34,6 +35,14 @@ def read_json(relative_path: str | Path) -> Any:
 
 def write_json(relative_path: str | Path, data: Any, indent: int = 2) -> None:
     write_text(relative_path, json.dumps(data, indent=indent, ensure_ascii=False))
+
+
+def read_yaml(relative_path: str | Path) -> Any:
+    return yaml.safe_load(read_text(relative_path))
+
+
+def write_yaml(relative_path: str | Path, data: Any) -> None:
+    write_text(relative_path, yaml.safe_dump(data, sort_keys=False))
 
 
 def read_pickle(path: str | Path) -> Any:
@@ -116,4 +125,19 @@ def get_abs_path(*parts: str | Path) -> str:
         return str(resolve_sandboxed(p))
     target = PROJECT_ROOT.joinpath(*parts)
     return str(resolve_sandboxed(target))
+
+
+def get_rel_path(path: Union[str, Path], base: Union[str, Path, None] = None) -> str:
+    if not path:
+        return ""
+    p_str = str(path).strip()
+    base_dir = Path(base).resolve() if base else PROJECT_ROOT
+    try:
+        p = Path(p_str).expanduser()
+        if p.is_absolute():
+            return str(p.resolve().relative_to(base_dir))
+    except (ValueError, OSError):
+        pass
+    return p_str
+
 

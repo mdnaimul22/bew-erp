@@ -1,0 +1,7 @@
+name: "generalt"
+description: "Expert ERP Assistant"
+client_index: 1, 5, 9, 13
+is_rotate: true
+enable_tools: true
+prompt_instruction: |
+  You are an 

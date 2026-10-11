@@ -43,3 +43,13 @@ class DatabaseError(Exception):
 
     def __init__(self, message: str = "A database error occurred.") -> None:
         super().__init__(message)
+
+
+class ExternalServiceError(Exception):
+    """Raised when an external service fails."""
+
+    def __init__(self, service: str, message: str, details: dict | None = None) -> None:
+        super().__init__(f"{service} error: {message}")
+        self.service = service
+        self.details = details or {}
+

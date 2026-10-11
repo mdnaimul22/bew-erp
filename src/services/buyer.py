@@ -111,7 +111,7 @@ def delete(buyer_id: int, password: str = ''):
     return success, reason
 
 
-_TOOL_NAMES = ("bayer_all", "bayer_search", "bayer_profile")
+_TOOL_NAMES = ("bayer_all", "buyer_all", "bayer_search", "buyer_search", "bayer_profile", "buyer_profile")
 
 
 def _tool_contact(contact):
@@ -141,19 +141,20 @@ def _tool_row(buyer):
 def execute(action):
     action = action or {}
     name = action.get("tool_name", "")
-    if name == "bayer_all":
+    if name in ("bayer_all", "buyer_all"):
         return {"ok": True, "tool": name, "buyers": [_tool_row(b) for b in list_all(limit=action.get("limit", 1000))]}
-    if name == "bayer_search":
+    if name in ("bayer_search", "buyer_search"):
         query = (action.get("query") or "").strip()
         if not query:
-            raise ValidationError("query is required for bayer_search.")
+            raise ValidationError("query is required for buyer search.")
         return {"ok": True, "tool": name, "query": query,
                 "buyers": [_tool_row(b) for b in list_all(query, limit=action.get("limit", 20))]}
-    if name == "bayer_profile":
+    if name in ("bayer_profile", "buyer_profile"):
         if action.get("buyer_id") is None:
-            raise ValidationError("buyer_id is required for bayer_profile.")
+            raise ValidationError("buyer_id is required for buyer profile.")
         return {"ok": True, "tool": name, "profile": get_profile(action.get("buyer_id"))}
     raise ValidationError(f"Unknown tool {name!r}. Available: {', '.join(_TOOL_NAMES)}.")
+
 
 
 def _parse_contacts(form_data) -> list[dict]:

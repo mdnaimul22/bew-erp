@@ -22,4 +22,5 @@ services.log
 
 # Isolated workspaces (superpowers)
 .worktrees/
-.superpowers/sdd/
+.superpowers/
+.models

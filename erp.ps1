@@ -60,7 +60,7 @@ function Get-App {
 
 function Start-App {
     Log "Starting app..."
-    Start-Process -FilePath $PYTHON -ArgumentList $APP -WorkingDirectory $DIR -NoNewWindow
+    Start-Process -FilePath $PYTHON -ArgumentList $APP -WorkingDirectory $DIR -WindowStyle Hidden
 }
 
 function Stop-App {
@@ -92,9 +92,16 @@ if ($Status) {
     }
 
 
-    $ok = Test-NetConnection localhost -Port 5000 -InformationLevel Quiet
+    $ok = Test-NetConnection 127.0.0.1 -Port 5000 -InformationLevel Quiet
     if ($ok) { Write-Host "[OK]   Port 5000: OPEN" -ForegroundColor Green }
     else      { Write-Host "[FAIL] Port 5000: CLOSED" -ForegroundColor Red }
+
+    $funnelStatus = tailscale funnel status 2>&1
+    if ($funnelStatus -match "Funnel on") {
+        Write-Host "[OK]   Funnel: ACTIVE (https://bew-main.tail374b2b.ts.net)" -ForegroundColor Green
+    } else {
+        Write-Host "[WARN] Funnel: INACTIVE" -ForegroundColor Yellow
+    }
 
     if (Test-Path $LOG) { Get-Content $LOG -Tail 5 -Encoding UTF8 }
     return

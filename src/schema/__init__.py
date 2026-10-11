@@ -124,6 +124,14 @@ from src.schema.analytics import (
     VisitorMessageCreate,
     VisitorMessageResponse,
 )
+from src.schema.agent import (
+    AgentProfile,
+    ToolCallRecord,
+    BaseAgentOutput,
+    AgentOutput,
+    AgentRequest,
+    AgentResponse,
+)
 
 __all__ = [
     # Common
@@ -238,4 +246,11 @@ __all__ = [
     "AnalyticsLogCreate",
     "AnalyticsLogResponse",
     "AnalyticsLog",
+    # Agent
+    "AgentProfile",
+    "ToolCallRecord",
+    "BaseAgentOutput",
+    "AgentOutput",
+    "AgentRequest",
+    "AgentResponse",
 ]

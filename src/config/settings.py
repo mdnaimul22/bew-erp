@@ -1,17 +1,29 @@
 from pathlib import Path
-from pydantic import Field
+from typing import Optional
+from pydantic import BaseModel, Field, model_validator, AliasChoices
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from .paths import PROJECT_ROOT
 
-class Settings(BaseSettings):
-    PROJECT_NAME: str = "bew"
-    VERSION: str = "1.0.0"
+class ClientConfig(BaseModel):
+    base_url: str
+    api_key: str
+    model: str
+    proxy: Optional[str] = None
+
+class Settings(BaseSettings): 
+    PROJECT_NAME: str = "Bangladesh Engineering Workshop" 
+    VERSION: str = "0.0.5"
     ENV: str = Field(default="development", validation_alias="APP_ENV")
 
     # Flask configurations
     SECRET_KEY: str = Field(..., validation_alias="SECRET_KEY")
-    APP_HOST: str = Field(..., validation_alias="APP_HOST")
-    APP_PORT: int = Field(..., validation_alias="APP_PORT")
+    API_HOST: str = Field(default="127.0.0.1", validation_alias=AliasChoices("API_HOST", "APP_HOST"))
+    API_PORT: int = Field(default=5000, validation_alias=AliasChoices("API_PORT", "APP_PORT"))
+    FRONTEND_URL: str = Field(default="http://localhost:3000", validation_alias="FRONTEND_URL")
+    FRONTEND_PORT: int = Field(default=3000, validation_alias="FRONTEND_PORT")
+    ENABLE_TAILSCALE: bool = Field(default=False, validation_alias=AliasChoices("ENABLE_TAILSCALE", "TAILSCALE"))
+    PUBLIC_URL: Optional[str] = Field(default=None, validation_alias="PUBLIC_URL")
+    
     SQLALCHEMY_TRACK_MODIFICATIONS: bool = Field(..., validation_alias="SQLALCHEMY_TRACK_MODIFICATIONS")
     BABEL_DEFAULT_LOCALE: str = Field(..., validation_alias="BABEL_DEFAULT_LOCALE")
     BABEL_TRANSLATION_DIRECTORIES: str = Field(..., validation_alias="BABEL_TRANSLATION_DIRECTORIES")
@@ -38,6 +50,20 @@ class Settings(BaseSettings):
     BUSINESS_LATITUDE: float = Field(..., validation_alias="BUSINESS_LATITUDE")
     BUSINESS_LONGITUDE: float = Field(..., validation_alias="BUSINESS_LONGITUDE")
 
+    LLM_TEMPERATURE: float = Field(default=0.7, validation_alias="LLM_TEMPERATURE")
+    LLM_MAX_TOKENS: int = Field(default=2048, validation_alias="LLM_MAX_TOKENS")
+    LLM_RETRIES: int = Field(default=3, validation_alias="LLM_RETRIES")
+    LLM_CLIENTS: list[ClientConfig] = Field(default_factory=list)
+    AGENT_PORFILE: str = Field(default=".profile/agents", validation_alias="AGENT_PORFILE")
+
+    @property
+    def APP_HOST(self) -> str:
+        return self.API_HOST
+
+    @property
+    def APP_PORT(self) -> int:
+        return self.API_PORT
+
     @property
     def DATABASE_URL(self) -> str:
         return f"sqlite:///{PROJECT_ROOT / self.DATABASE_NAME}"
@@ -51,6 +77,37 @@ class Settings(BaseSettings):
     # Files
     shops_json_rel: str = Field(..., validation_alias="SHOPS_JSON")
     odt_file_rel: str = Field(..., validation_alias="ODT_FILE")
+
+    @model_validator(mode="before")
+    @classmethod
+    def assemble_client_configs(cls, values: dict) -> dict:
+        grouped: dict[str, dict[str, str]] = {}
+        for key, val in values.items():
+            k = key.lower()
+            if not k.startswith("client_configs_"):
+                continue
+            parts = k.split("_", 3)
+            if len(parts) >= 4:
+                idx, field_name = parts[2], parts[3]
+                grouped.setdefault(idx, {})[field_name] = str(val)
+
+        clients: list[ClientConfig] = []
+        for _, data in sorted(grouped.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
+            base_url = data.get("base_url")
+            api_key = data.get("api_key")
+            model = data.get("model")
+            if base_url and api_key and model:
+                clients.append(
+                    ClientConfig(
+                        base_url=base_url,
+                        api_key=api_key,
+                        model=model,
+                        proxy=data.get("proxy_http"),
+                    )
+                )
+
+        values["LLM_CLIENTS"] = clients
+        return values
 
     def _resolve(self, val: str) -> Path:
         val = val.strip()

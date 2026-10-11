@@ -14,3 +14,7 @@ pytz
 pydantic
 pydantic-settings
 flask-limiter
+openai
+pydantic-ai
+pyyaml
+pytest-asyncio

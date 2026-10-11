@@ -8,7 +8,7 @@ if basedir not in sys.path:
     sys.path.append(basedir)
 
 # ── src imports ──────────────────────────────────────────────
-from src.config import Settings, setup_logger, ensure_dir
+from src.config import Settings, setup_logger, ensure_dir, get_value
 logger = setup_logger(Settings.LOG_DIR / "app.log", name="bew.app")
 
 from src.db.database import db
@@ -163,4 +163,10 @@ app.jinja_env.filters['parse_contact_info'] = parse_contact_info
 
 # ── Entry point ──────────────────────────────────────────────
 if __name__ == '__main__':
-    app.run(debug=True, host=Settings.APP_HOST, port=Settings.APP_PORT)
+    if Settings.ENABLE_TAILSCALE and get_value("WERKZEUG_RUN_MAIN") != "true":
+        try:
+            from src.helpers import setup_tailscale_ingress_sync
+            setup_tailscale_ingress_sync(Settings.APP_PORT)
+        except Exception as e:
+            logger.error(f"Tailscale Ingress initialization failed: {e}")
+    app.run(debug=Settings.is_development, host=Settings.APP_HOST, port=Settings.APP_PORT)

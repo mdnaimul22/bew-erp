@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+from pydantic import BaseModel, Field, JsonValue, model_validator
+
+
+class AgentProfile(BaseModel):
+    name: str = Field(..., pattern=r"^[a-zA-Z0-9_-]+$")
+    description: str = Field(default="")
+    prompt_path: str | None = Field(default=None)
+    prompt_instruction: str | None = Field(default=None)
+    client_index: int = Field(default=0, ge=0)
+    client_indices: list[int] = Field(default_factory=list)
+    enable_tools: bool = Field(default=False)
+    is_rotate: bool = Field(default=False)
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_client_indices(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            c_idx = values.get("client_index")
+            if isinstance(c_idx, str) and "," in c_idx:
+                parsed = [int(x.strip()) for x in c_idx.split(",") if x.strip().isdigit()]
+                if parsed:
+                    values["client_index"] = parsed[0]
+                    values.setdefault("client_indices", parsed)
+        return values
+
+    @model_validator(mode="after")
+    def validate_prompt_source(self) -> AgentProfile:
+        if not self.prompt_path and not self.prompt_instruction:
+            raise ValueError("Either prompt_instruction or prompt_path must be provided")
+        return self
+
+
+class ToolCallRecord(BaseModel):
+    tool_name: str = Field(..., min_length=1)
+    tool_args: dict[str, JsonValue] = Field(default_factory=dict)
+    output: str = Field(default="")
+
+
+class BaseAgentOutput(BaseModel):
+    tools_used: list[str] = Field(default_factory=list)
+    tool_calls: list[ToolCallRecord] = Field(default_factory=list)
+
+
+class AgentOutput(BaseAgentOutput):
+    summary: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1)
+    data: dict[str, JsonValue] = Field(default_factory=dict)
+    status: str = Field(default="completed", pattern=r"^(completed|failed|requires_input)$")
+
+
+class AgentRequest(BaseModel):
+    prompt: str = Field(..., min_length=1)
+    agent_name: str = Field(default="general", pattern=r"^[a-zA-Z0-9_-]+$")
+    instructions: str | None = None
+    parameters: dict[str, JsonValue] = Field(default_factory=dict)
+    client_index: int | None = Field(default=None, ge=0)
+
+
+class AgentResponse(BaseModel):
+    output: AgentOutput
+    duration_ms: float = Field(default=0.0, ge=0)
+    client_index: int = 0
