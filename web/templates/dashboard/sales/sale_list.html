@@ -3,6 +3,7 @@
 {% from 'components/_navigation.html' import page_header, breadcrumb with context %}
 {% from 'components/_buttons.html' import btn with context %}
 {% from 'components/_delete.html' import delete_button with context %}
+{% from 'components/_cards.html' import mobile_card with context %}
 {% from 'components/_seo.html' import og_tags, breadcrumb_schema with context %}
 
 {% block title %}{{ _('Sales') }} - {{ _('Bangladesh Engineering Workshop') }}{% endblock %}
@@ -18,8 +19,7 @@
 
 <section class="min-w-0">
     {% if sales %}
-    <div
-        class="overflow-x-auto bg-[var(--color-surface)] rounded-[var(--radius)] shadow-[var(--shadow)] border border-[var(--color-border)] min-w-0">
+    <div class="hidden md:block overflow-x-auto bg-[var(--color-surface)] rounded-[var(--radius)] shadow-[var(--shadow)] border border-[var(--color-border)] min-w-0">
         <table class="w-full border-collapse table-auto min-w-[700px] text-sm">
             <thead>
                 <tr class="bg-[var(--color-bg)] text-[var(--color-text-muted)]">
@@ -85,9 +85,43 @@
                 {% endfor %}
             </tbody>
         </table>
-
-        {{ render_pagination(meta, 'sales.sale_list', search_query) }}
     </div>
+
+    <div class="block md:hidden space-y-3">
+        {% for sale in sales %}
+        {% call mobile_card(
+            title=sale.buyer_name or _('Cash Sale'),
+            url=url_for('sales.sale_detail', sale_id=sale.id),
+            id_chip='#' ~ (sale.display_id or sale.id)|lower,
+            subtitle=(sale.item_count|string ~ ' ' ~ _('items')) if sale.item_count else ''
+        ) %}
+        <div class="grid grid-cols-2 gap-2 text-xs py-2 my-1.5 border-y border-[var(--color-border)]/60">
+            <div>
+                <span class="text-[10px] uppercase text-[var(--color-text-muted)] block">{{ _('Date') }}</span>
+                <span class="font-medium text-[var(--color-text)] truncate block">{{ sale.sale_date_display or '-' }}</span>
+            </div>
+            <div>
+                <span class="text-[10px] uppercase text-[var(--color-text-muted)] block">{{ _('Voucher') }}</span>
+                <span class="font-medium text-[var(--color-text)] block">
+                    {% if sale.voucher_image %}
+                    <span class="material-icons text-xs text-[var(--color-primary)] align-middle">receipt</span> {{ _('Attached') }}
+                    {% else %}-{% endif %}
+                </span>
+            </div>
+        </div>
+        <div class="flex items-center justify-between pt-1">
+            <span class="text-xs font-bold text-[var(--color-text)]">৳ {{ sale.total_amount }}</span>
+            <div class="flex gap-1.5">
+                {{ btn(icon='visibility', variant='secondary', size='xs', href=url_for('sales.sale_detail', sale_id=sale.id)) }}
+                {{ btn(icon='edit', variant='primary', size='xs', href=url_for('sales.edit_sale', sale_id=sale.id)) }}
+                {{ delete_button(action_url=url_for('sales.delete_sale', sale_id=sale.id), size='xs') }}
+            </div>
+        </div>
+        {% endcall %}
+        {% endfor %}
+    </div>
+
+    {{ render_pagination(meta, 'sales.sale_list', search_query) }}
     {% else %}
     <div class="text-center py-12 text-[var(--color-text-muted)]">
         <span class="material-icons text-5xl opacity-30 block mb-2">payments</span>

@@ -3,6 +3,7 @@
 {% from 'components/_navigation.html' import page_header, breadcrumb with context %}
 {% from 'components/_buttons.html' import btn with context %}
 {% from 'components/_delete.html' import delete_button with context %}
+{% from 'components/_cards.html' import mobile_card with context %}
 {% from 'components/_seo.html' import og_tags, breadcrumb_schema with context %}
 
 {% block title %}{{ _('Purchases') }} - {{ _('Bangladesh Engineering Workshop') }}{% endblock %}
@@ -25,8 +26,7 @@ url_for('purchases.new_purchase') %}
 {# ── Purchases Table ─────────────────────────────────────── #}
 <section class="min-w-0">
     {% if purchases %}
-    <div
-        class="overflow-x-auto bg-[var(--color-surface)] rounded-[var(--radius)] shadow-[var(--shadow)] border border-[var(--color-border)] min-w-0">
+    <div class="hidden md:block overflow-x-auto bg-[var(--color-surface)] rounded-[var(--radius)] shadow-[var(--shadow)] border border-[var(--color-border)] min-w-0">
         <table class="w-full border-collapse table-auto min-w-[900px] text-sm">
             <thead>
                 <tr class="bg-[var(--color-bg)] text-[var(--color-text-muted)]">
@@ -122,9 +122,47 @@ url_for('purchases.new_purchase') %}
                 {% endfor %}
             </tbody>
         </table>
-
-        {{ render_pagination(meta, 'purchases.purchase_list', search_query) }}
     </div>
+
+    <div class="block md:hidden space-y-3">
+        {% for p in purchases %}
+        {% call mobile_card(
+            title=p.supplier_name or _('General Supplier'),
+            url=url_for('purchases.purchase_detail', purchase_id=p.id),
+            id_chip='#' ~ (p.display_id or p.id)|lower,
+            subtitle=(p.item_count|string ~ ' ' ~ _('items')) if p.item_count else ''
+        ) %}
+        <div class="grid grid-cols-2 gap-2 text-xs py-2 my-1.5 border-y border-[var(--color-border)]/60">
+            <div>
+                <span class="text-[10px] uppercase text-[var(--color-text-muted)] block">{{ _('Date') }}</span>
+                <span class="font-medium text-[var(--color-text)] truncate block">{{ p.purchase_date_display or '-' }}</span>
+            </div>
+            <div>
+                <span class="text-[10px] uppercase text-[var(--color-text-muted)] block">{{ _('Voucher No') }}</span>
+                <span class="font-medium text-[var(--color-text)] font-mono truncate block">{{ p.voucher_no or '-' }}</span>
+            </div>
+            <div>
+                <span class="text-[10px] uppercase text-[var(--color-text-muted)] block">{{ _('Payment') }}</span>
+                <span class="font-medium text-[var(--color-text)] truncate block">{{ _(p.payment_status or '-') }}</span>
+            </div>
+            <div>
+                <span class="text-[10px] uppercase text-[var(--color-text-muted)] block">{{ _('Paid') }}</span>
+                <span class="font-medium text-[var(--color-text)] truncate block">৳ {{ p.paid_amount or 0 }}</span>
+            </div>
+        </div>
+        <div class="flex items-center justify-between pt-1">
+            <span class="text-xs font-bold text-[var(--color-text)]">৳ {{ p.total_amount or 0 }}</span>
+            <div class="flex gap-1.5">
+                {{ btn(icon='visibility', variant='secondary', size='xs', href=url_for('purchases.purchase_detail', purchase_id=p.id)) }}
+                {{ btn(icon='edit', variant='primary', size='xs', href=url_for('purchases.edit_purchase', purchase_id=p.id)) }}
+                {{ delete_button(action_url=url_for('purchases.delete_purchase', purchase_id=p.id), size='xs') }}
+            </div>
+        </div>
+        {% endcall %}
+        {% endfor %}
+    </div>
+
+    {{ render_pagination(meta, 'purchases.purchase_list', search_query) }}
     {% else %}
     <div class="text-center py-12 text-[var(--color-text-muted)]">
         <span class="material-icons text-5xl opacity-30 block mb-2">receipt_long</span>

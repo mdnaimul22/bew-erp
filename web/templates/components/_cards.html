@@ -27,3 +27,40 @@
     {{ caller() }}
 </div>
 {% endmacro %}
+
+{% macro mobile_card(title, url='', id_chip='', subtitle='', badge='', class_extra='') %}
+<div class="bg-[var(--color-surface)] p-3.5 sm:p-4 rounded-[var(--radius)] border border-[var(--color-border)] shadow-sm hover:border-[var(--color-primary)] transition-all cursor-pointer relative {{ class_extra }}"
+     {% if url %}@click="if(!$event.target.closest('a, button, form')) htmx.ajax('GET', '{{ url }}', {target:'#content-area', select:'#content-area', swap:'innerHTML', pushUrl:true})"{% endif %}>
+    <!-- Top Row: Title, Subtitle, ID Chip & Status Badge -->
+    <div class="flex items-start justify-between gap-2 mb-2">
+        <div class="min-w-0 flex-1">
+            <h3 class="font-bold text-base text-[var(--color-text)] truncate leading-snug">
+                {% if url %}
+                <a href="{{ url }}" class="text-[var(--color-text)] hover:text-[var(--color-primary)] no-underline">{{ title }}</a>
+                {% else %}
+                {{ title }}
+                {% endif %}
+            </h3>
+            {% if id_chip or subtitle %}
+            <div class="flex items-center gap-1.5 mt-0.5 text-xs text-[var(--color-text-muted)] flex-wrap">
+                {% if id_chip %}
+                <span class="font-mono bg-[var(--color-bg)] px-1.5 py-0.5 rounded border border-[var(--color-border)] text-[var(--color-primary)] font-semibold text-[11px]">{{ id_chip }}</span>
+                {% endif %}
+                {% if subtitle %}
+                <span class="truncate">{{ subtitle }}</span>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% if badge %}
+        <div class="shrink-0 pt-0.5">
+            {{ badge }}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Body & Footer via caller() -->
+    {{ caller() }}
+</div>
+{% endmacro %}
+

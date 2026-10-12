@@ -4,6 +4,7 @@
 {% from 'components/_buttons.html' import btn with context %}
 {% from 'components/_delete.html' import delete_button with context %}
 {% from 'components/_badges.html' import badge with context %}
+{% from 'components/_cards.html' import mobile_card with context %}
 {% from 'components/_seo.html' import og_tags, breadcrumb_schema with context %}
 
 {% block title %}{{ _('Buyer Companies') }} - {{ _('Bangladesh Engineering Workshop') }}{% endblock %}
@@ -26,7 +27,7 @@
 {# ── Buyer Table ─────────────────────────────────────────── #}
 <section class="min-w-0">
     {% if buyers %}
-    <div class="overflow-x-auto bg-[var(--color-surface)] rounded-[var(--radius)] shadow-[var(--shadow)] border border-[var(--color-border)] min-w-0">
+    <div class="hidden md:block overflow-x-auto bg-[var(--color-surface)] rounded-[var(--radius)] shadow-[var(--shadow)] border border-[var(--color-border)] min-w-0">
         <table class="w-full border-collapse table-auto min-w-[700px]">
             <thead>
                 <tr class="bg-[var(--color-bg)] text-[var(--color-text-muted)]">
@@ -82,9 +83,39 @@
                 {% endfor %}
             </tbody>
         </table>
-
-            {{ render_pagination(meta, 'buyers.buyer_list', search_query) }}
     </div>
+
+    <div class="block md:hidden space-y-3">
+        {% for buyer in buyers %}
+        {% set primary_contact = (buyer.contacts | selectattr('is_primary', 'equalto', True) | first) or (buyer.contacts[0] if buyer.contacts else none) %}
+        {% call mobile_card(
+            title=buyer.company_name,
+            url=url_for('buyers.buyer_detail', buyer_id=buyer.id),
+            id_chip='#' ~ loop.index,
+            subtitle=primary_contact.name if primary_contact else ''
+        ) %}
+        <div class="grid grid-cols-2 gap-2 text-xs py-2 my-1.5 border-y border-[var(--color-border)]/60">
+            <div>
+                <span class="text-[10px] uppercase text-[var(--color-text-muted)] block">{{ _('Address') }}</span>
+                <span class="font-medium text-[var(--color-text)] truncate block">{{ buyer.address or '-' }}</span>
+            </div>
+            <div>
+                <span class="text-[10px] uppercase text-[var(--color-text-muted)] block">{{ _('Contacts') }}</span>
+                <span class="font-medium text-[var(--color-text)] truncate block">{{ primary_contact.designation if (primary_contact and primary_contact.designation) else '-' }}</span>
+            </div>
+        </div>
+        <div class="flex items-center justify-end pt-1">
+            <div class="flex gap-1.5">
+                {{ btn(icon='visibility', variant='secondary', size='xs', href=url_for('buyers.buyer_detail', buyer_id=buyer.id)) }}
+                {{ btn(icon='edit', variant='primary', size='xs', href=url_for('buyers.edit_buyer', buyer_id=buyer.id)) }}
+                {{ delete_button(action_url=url_for('buyers.delete_buyer', buyer_id=buyer.id), size='xs') }}
+            </div>
+        </div>
+        {% endcall %}
+        {% endfor %}
+    </div>
+
+    {{ render_pagination(meta, 'buyers.buyer_list', search_query) }}
     {% else %}
     <div class="text-center py-12 text-[var(--color-text-muted)]">
         <span class="material-icons text-5xl opacity-30 block mb-2">search_off</span>

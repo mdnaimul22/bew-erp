@@ -3,6 +3,7 @@
 {% from 'components/_navigation.html' import page_header, breadcrumb with context %}
 {% from 'components/_badges.html' import badge with context %}
 {% from 'components/_buttons.html' import btn with context %}
+{% from 'components/_cards.html' import mobile_card with context %}
 {% from 'components/_seo.html' import meta_tags, og_tags, breadcrumb_schema with context %}
 
 {% block title %}
@@ -29,8 +30,7 @@ url=request.url
 
 {# ── Shop Table ──────────────────────────────────────────── #}
 {% if shops %}
-<div
-    class="overflow-x-auto rounded-[var(--radius)] border border-[var(--color-border)] shadow-[var(--shadow)] bg-[var(--color-surface)]">
+<div class="hidden md:block overflow-x-auto rounded-[var(--radius)] border border-[var(--color-border)] shadow-[var(--shadow)] bg-[var(--color-surface)]">
     <table class="shops-table w-full border-collapse text-sm" id="shops-table">
         <thead>
             <tr class="bg-[var(--color-bg)]">
@@ -141,9 +141,49 @@ url=request.url
             {% endfor %}
         </tbody>
     </table>
-
-    {{ render_pagination(meta, 'shops.shop_list', search_query) }}
 </div>
+
+<div class="block md:hidden space-y-3 mt-4">
+    {% for shop in shops %}
+    {% call mobile_card(
+        title=shop.name,
+        url=url_for('shops.shop_detail', shop_id=shop.id),
+        id_chip='#' ~ (loop.index + ((meta.page - 1) * meta.per_page)),
+        subtitle=shop.proprietor or '',
+        badge=shop.category_name or ''
+    ) %}
+    <div class="grid grid-cols-2 gap-2 text-xs py-2 my-1.5 border-y border-[var(--color-border)]/60">
+        <div>
+            <span class="text-[10px] uppercase text-[var(--color-text-muted)] block">{{ _('Address') }}</span>
+            <span class="font-medium text-[var(--color-text)] truncate block">{{ shop.address or '-' }}</span>
+        </div>
+        <div>
+            <span class="text-[10px] uppercase text-[var(--color-text-muted)] block">{{ _('Mobile') }}</span>
+            {% if shop.mobile %}
+            {% set first_num = shop.mobile.split()[0] %}
+            <a href="tel:{{ first_num }}" class="font-medium text-[var(--color-success)] truncate block hover:underline" dir="ltr">{{ first_num }}</a>
+            {% else %}
+            <span class="font-medium text-[var(--color-text-muted)] block">-</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="flex items-center justify-between pt-1">
+        <div class="flex flex-wrap gap-1">
+            {% if shop.tags %}
+            {% for tag in shop.tags[:3] %}
+            <span class="inline-block px-1.5 py-0.5 text-[10px] rounded bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300">{{ tag.name }}</span>
+            {% endfor %}
+            {% endif %}
+        </div>
+        <a href="{{ url_for('shops.shop_detail', shop_id=shop.id) }}" class="text-xs text-[var(--color-primary)] font-semibold hover:underline flex items-center gap-0.5">
+            {{ _('Details') }} <span class="material-icons text-xs">arrow_forward</span>
+        </a>
+    </div>
+    {% endcall %}
+    {% endfor %}
+</div>
+
+{{ render_pagination(meta, 'shops.shop_list', search_query) }}
 
 
 
